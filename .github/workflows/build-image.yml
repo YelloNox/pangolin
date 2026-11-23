@@ -1,0 +1,86 @@
+name: Build & Push Docker Image
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            build:
+                description: "Build variant"
+                required: true
+                default: "oss"
+                type: choice
+                options:
+                    - oss
+                    - enterprise
+            database:
+                description: "Database driver"
+                required: true
+                default: "sqlite"
+                type: choice
+                options:
+                    - sqlite
+                    - pg
+
+env:
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - build: oss
+                      database: sqlite
+                    - build: enterprise
+                      database: sqlite
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Extract metadata
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=raw,value=latest
+                      type=sha,prefix=sha-
+
+            - name: Build and push (SQLite)
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  platforms: linux/amd64,linux/arm64
+                  push: true
+                  build-args: |
+                      BUILD=${{ matrix.build }}
+                      DATABASE=sqlite
+                      VERSION=${{ github.sha }}
+                      REVISION=${{ github.sha }}
+                      CREATED=${{ steps.meta.outputs.created }}
+                      IMAGE_TITLE="Pangolin ${{ matrix.build }}"
+                      IMAGE_DESCRIPTION="Identity-aware VPN and proxy"
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha,scope=build-${{ matrix.build }}-sqlite
+                  cache-to: type=gha,mode=max,scope=build-${{ matrix.build }}-sqlite
