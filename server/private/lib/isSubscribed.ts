@@ -19,11 +19,5 @@ export async function isSubscribed(
     orgId: string,
     tiers: Tier[]
 ): Promise<boolean> {
-    if (build === "saas") {
-        const { tier, active } = await getOrgTierData(orgId);
-        const isTier = (tier && tiers.includes(tier)) || false;
-        return active && isTier;
-    }
-
-    return false;
+    return true;
 }

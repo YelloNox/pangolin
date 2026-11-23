@@ -4,5 +4,5 @@ export async function isSubscribed(
     orgId: string,
     tiers: Tier[]
 ): Promise<boolean> {
-    return false;
+    return true;
 }

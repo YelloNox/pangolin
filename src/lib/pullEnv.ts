@@ -67,10 +67,7 @@ export function pullEnv(): Env {
                 process.env.FLAGS_DISABLE_PRODUCT_HELP_BANNERS === "true"
                     ? true
                     : false,
-            disableEnterpriseFeatures:
-                process.env.DISABLE_ENTERPRISE_FEATURES === "true"
-                    ? true
-                    : false,
+            disableEnterpriseFeatures: false,
             disableVirtualApiKeysUi:
                 process.env.FLAGS_DISABLE_VIRTUAL_API_KEYS_UI === "true"
                     ? true

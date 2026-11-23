@@ -22,25 +22,5 @@ export async function verifyValidLicense(
     res: Response,
     next: NextFunction
 ) {
-    try {
-        if (build != "enterprise") {
-            return next();
-        }
-
-        const unlocked = await license.isUnlocked();
-        if (!unlocked) {
-            return next(
-                createHttpError(HttpCode.FORBIDDEN, "License is not valid")
-            );
-        }
-
-        return next();
-    } catch (e) {
-        return next(
-            createHttpError(
-                HttpCode.INTERNAL_SERVER_ERROR,
-                "Error verifying license"
-            )
-        );
-    }
+    return next();
 }

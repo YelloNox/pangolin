@@ -41,8 +41,15 @@ export class License {
     public async check(): Promise<LicenseStatus> {
         return {
             hostId: this.hostMeta.hostMetaId,
-            isHostLicensed: false,
-            isLicenseValid: false
+            isHostLicensed: true,
+            isLicenseValid: true,
+            tier: "enterprise",
+            maxSites: -1,
+            usedSites: 0,
+            maxUsers: -1,
+            usedUsers: 0,
+            maxMachines: -1,
+            usedMachines: 0
         };
     }
 
@@ -51,11 +58,11 @@ export class License {
     }
 
     public async isUnlocked() {
-        return false;
+        return true;
     }
 
     public async hasTier(tier: LicenseKeyTier[]) {
-        return false;
+        return true;
     }
 }
 

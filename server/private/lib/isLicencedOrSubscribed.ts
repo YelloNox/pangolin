@@ -20,13 +20,5 @@ export async function isLicensedOrSubscribed(
     orgId: string,
     tiers: Tier[]
 ): Promise<boolean> {
-    if (build === "enterprise") {
-        return await license.isUnlocked();
-    }
-
-    if (build === "saas") {
-        return isSubscribed(orgId, tiers);
-    }
-
-    return false;
+    return true;
 }

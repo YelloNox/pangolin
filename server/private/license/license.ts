@@ -146,30 +146,11 @@ LQIDAQAB
     }
 
     public async isUnlocked(): Promise<boolean> {
-        if (build == "saas") {
-            return true;
-        }
-        const status = await this.check();
-        if (status.isHostLicensed) {
-            if (status.isLicenseValid) {
-                return true;
-            }
-        }
-        return false;
+        return true;
     }
 
     public async hasTier(tier: LicenseKeyTier[]): Promise<boolean> {
-        if (build == "saas") {
-            return true;
-        }
-        const status = await this.check();
-        if (status.isHostLicensed && status.isLicenseValid) {
-            return (
-                status.tier !== undefined &&
-                tier.includes(status.tier as LicenseKeyTier)
-            );
-        }
-        return false;
+        return true;
     }
 
     public async check(): Promise<LicenseStatus> {

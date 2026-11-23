@@ -4,5 +4,5 @@ export async function isLicensedOrSubscribed(
     orgId: string,
     tiers: Tier[]
 ): Promise<boolean> {
-    return false;
+    return true;
 }

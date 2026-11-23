@@ -25,55 +25,6 @@ export function verifyValidSubscription(tiers: Tier[]) {
         res: Response,
         next: NextFunction
     ): Promise<any> {
-        try {
-            if (build !== "saas") {
-                return next();
-            }
-
-            const orgId =
-                req.params?.orgId ||
-                req.body?.orgId ||
-                req.query?.orgId ||
-                req.userOrgId ||
-                req.apiKeyOrg?.orgId;
-
-            if (!orgId) {
-                return next(
-                    createHttpError(
-                        HttpCode.BAD_REQUEST,
-                        "Organization ID is required to verify subscription"
-                    )
-                );
-            }
-
-            const { tier, active } = await getOrgTierData(orgId);
-            const isTier = tiers.includes(tier as Tier);
-            if (!active) {
-                return next(
-                    createHttpError(
-                        HttpCode.FORBIDDEN,
-                        "Organization does not have an active subscription"
-                    )
-                );
-            }
-            if (!isTier) {
-                return next(
-                    createHttpError(
-                        HttpCode.FORBIDDEN,
-                        "Organization subscription tier does not have access to this feature"
-                    )
-                );
-            }
-
-            return next();
-        } catch (e) {
-            logger.error(e);
-            return next(
-                createHttpError(
-                    HttpCode.INTERNAL_SERVER_ERROR,
-                    "Error verifying subscription"
-                )
-            );
-        }
+        return next();
     };
 }
