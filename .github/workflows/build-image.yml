@@ -24,7 +24,6 @@ on:
 
 env:
     REGISTRY: ghcr.io
-    IMAGE_NAME: ${{ github.repository }}
 
 jobs:
     build:
@@ -40,8 +39,10 @@ jobs:
                 include:
                     - build: oss
                       database: sqlite
+                      image_name: ${{ github.repository }}
                     - build: enterprise
                       database: sqlite
+                      image_name: ${{ github.repository_owner }}/pangolin-enterprise
 
         steps:
             - name: Checkout
@@ -61,7 +62,7 @@ jobs:
               id: meta
               uses: docker/metadata-action@v5
               with:
-                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  images: ${{ env.REGISTRY }}/${{ matrix.image_name }}
                   tags: |
                       type=raw,value=latest
                       type=sha,prefix=sha-
