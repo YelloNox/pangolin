@@ -18,6 +18,7 @@ import {
     resourcePolicyPincode,
     resourcePolicyRules,
     resourcePolicyWhiteList,
+    resourceRulePolicies,
     resourceRules,
     resources,
     resourceWhitelist,
@@ -1547,6 +1548,14 @@ export async function updatePublicResources(
             await syncResourceLabels(resource.resourceId, labelIds, trx);
         }
 
+        // Sync the access-rules-only policies stacked onto this resource.
+        await syncResourceRulePolicies(
+            resource.resourceId,
+            orgId,
+            resourceData["rule-policies"] || [],
+            trx
+        );
+
         results.push({
             proxyResource: resource,
             targetsToUpdate,
@@ -1555,6 +1564,65 @@ export async function updatePublicResources(
     }
 
     return results;
+}
+
+// Replaces the set of access-rules-only policies stacked onto a resource. Each
+// entry references a policy key from "public-policies" by niceId; the policy
+// must exist in this org and be scope "rules-only".
+type StackedRulePolicy = {
+    policy: string;
+    position?: "before" | "after";
+    "sort-order"?: number;
+    enabled?: boolean;
+};
+
+async function syncResourceRulePolicies(
+    resourceId: number,
+    orgId: string,
+    rulePolicies: StackedRulePolicy[],
+    trx: Transaction
+) {
+    await trx
+        .delete(resourceRulePolicies)
+        .where(eq(resourceRulePolicies.resourceId, resourceId));
+
+    for (const entry of rulePolicies) {
+        const policyNiceId = entry.policy;
+
+        const [policy] = await trx
+            .select({
+                resourcePolicyId: resourcePolicies.resourcePolicyId,
+                scope: resourcePolicies.scope
+            })
+            .from(resourcePolicies)
+            .where(
+                and(
+                    eq(resourcePolicies.niceId, policyNiceId),
+                    eq(resourcePolicies.orgId, orgId)
+                )
+            )
+            .limit(1);
+
+        if (!policy) {
+            throw new Error(
+                `Stacked rule policy '${policyNiceId}' not found for resource ${resourceId}`
+            );
+        }
+
+        if (policy.scope !== "rules-only") {
+            throw new Error(
+                `Policy '${policyNiceId}' cannot be stacked onto a resource: only access-rules-only policies (scope: rules-only) can be stacked`
+            );
+        }
+
+        await trx.insert(resourceRulePolicies).values({
+            resourceId,
+            resourcePolicyId: policy.resourcePolicyId,
+            position: entry.position ?? "after",
+            sortOrder: entry["sort-order"] ?? 0,
+            enabled: entry.enabled ?? true
+        });
+    }
 }
 
 function getRuleAction(input: string) {

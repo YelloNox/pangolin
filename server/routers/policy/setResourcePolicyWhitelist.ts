@@ -148,6 +148,15 @@ export async function setResourcePolicyWhitelist(
             );
         }
 
+        if (policy.scope === "rules-only") {
+            return next(
+                createHttpError(
+                    HttpCode.BAD_REQUEST,
+                    "Access-rules-only policies do not support authentication settings"
+                )
+            );
+        }
+
         await db.transaction(async (trx) => {
             await trx
                 .update(resourcePolicies)

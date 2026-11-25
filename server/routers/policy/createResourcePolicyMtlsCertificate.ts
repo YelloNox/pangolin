@@ -99,7 +99,10 @@ export async function createResourcePolicyMtlsCertificate(
         const { name, certificate } = parsedBody.data;
 
         const [policy] = await db
-            .select({ resourcePolicyId: resourcePolicies.resourcePolicyId })
+            .select({
+                resourcePolicyId: resourcePolicies.resourcePolicyId,
+                scope: resourcePolicies.scope
+            })
             .from(resourcePolicies)
             .where(eq(resourcePolicies.resourcePolicyId, resourcePolicyId))
             .limit(1);
@@ -107,6 +110,15 @@ export async function createResourcePolicyMtlsCertificate(
         if (!policy) {
             return next(
                 createHttpError(HttpCode.NOT_FOUND, "Resource policy not found")
+            );
+        }
+
+        if (policy.scope === "rules-only") {
+            return next(
+                createHttpError(
+                    HttpCode.BAD_REQUEST,
+                    "Access-rules-only policies do not support authentication settings"
+                )
             );
         }
 

@@ -58,6 +58,7 @@ export async function queryResourcePolicy(
     const [res] = await db
         .select({
             resourcePolicyId: resourcePolicies.resourcePolicyId,
+            scope: resourcePolicies.scope,
             sso: resourcePolicies.sso,
             applyRules: resourcePolicies.applyRules,
             emailWhitelistEnabled: resourcePolicies.emailWhitelistEnabled,

@@ -6,6 +6,7 @@ import type { PolicyRuleMatchType } from "./policy-access-rule-validation";
 
 export const createPolicySchema = z.object({
     name: z.string().min(1).max(255),
+    scope: z.enum(["global", "rules-only"]).default("global"),
     sso: z.boolean().default(true),
     skipToIdpId: z.number().nullable().optional(),
     emailWhitelistEnabled: z.boolean().default(false),

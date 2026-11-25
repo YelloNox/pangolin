@@ -19,7 +19,7 @@ export type AttachedResource = Pick<
 
 export type ResourcePolicyWithResources = Pick<
     ResourcePolicy,
-    "resourcePolicyId" | "niceId" | "name" | "orgId"
+    "resourcePolicyId" | "niceId" | "name" | "orgId" | "scope"
 > & {
     resources: Array<AttachedResource>;
 };

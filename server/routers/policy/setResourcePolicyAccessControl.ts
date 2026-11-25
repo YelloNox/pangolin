@@ -160,6 +160,15 @@ export async function setResourcePolicyAccessControl(
             );
         }
 
+        if (policy.scope === "rules-only") {
+            return next(
+                createHttpError(
+                    HttpCode.BAD_REQUEST,
+                    "Access-rules-only policies do not support authentication settings"
+                )
+            );
+        }
+
         // Check if Identity provider in `skipToIdpId` exists
         if (idpId) {
             const providerExists = await idpExistsForOrg(idpId, policy.orgId);

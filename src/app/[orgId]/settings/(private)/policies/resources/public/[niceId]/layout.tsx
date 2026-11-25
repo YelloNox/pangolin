@@ -43,15 +43,21 @@ export default async function EditPolicyLayout(props: EditPolicyLayoutProps) {
         redirect(`/${params.orgId}/settings/policies/resources/public`);
     }
 
+    const isRulesOnly = policyResponse.scope === "rules-only";
+
     const navItems = [
         {
             title: t("general"),
             href: "/{orgId}/settings/policies/resources/public/{niceId}/general"
         },
-        {
-            title: t("authentication"),
-            href: "/{orgId}/settings/policies/resources/public/{niceId}/authentication"
-        },
+        ...(isRulesOnly
+            ? []
+            : [
+                  {
+                      title: t("authentication"),
+                      href: "/{orgId}/settings/policies/resources/public/{niceId}/authentication"
+                  }
+              ]),
         {
             title: t("policyAccessRulesTitle"),
             href: "/{orgId}/settings/policies/resources/public/{niceId}/rules"

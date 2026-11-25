@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
 import { ControlledDataTable } from "./ui/controlled-data-table";
 import type { ExtendedColumnDef } from "./ui/data-table";
 import {
@@ -150,7 +151,16 @@ export function ResourcePoliciesTable({
             enableHiding: false,
             friendlyName: t("name"),
             header: () => <span className="p-3">{t("name")}</span>,
-            cell: ({ row }) => <span>{row.original.name}</span>
+            cell: ({ row }) => (
+                <div className="flex items-center gap-2">
+                    <span>{row.original.name}</span>
+                    {row.original.scope === "rules-only" && (
+                        <Badge variant="secondary">
+                            {t("resourcePolicyKindRulesOnlyBadge")}
+                        </Badge>
+                    )}
+                </div>
+            )
         },
         {
             id: "niceId",
@@ -286,13 +296,26 @@ export function ResourcePoliciesTable({
                 searchQuery={searchParams.get("query")?.toString()}
                 onSearch={handleSearchChange}
                 onPaginationChange={handlePaginationChange}
-                onAdd={() =>
-                    startNavigation(() =>
-                        router.push(
-                            `/${orgId}/settings/policies/resources/public/create`
-                        )
-                    )
-                }
+                addActions={[
+                    {
+                        label: t("resourcePoliciesAddNormal"),
+                        onSelect: () =>
+                            startNavigation(() =>
+                                router.push(
+                                    `/${orgId}/settings/policies/resources/public/create`
+                                )
+                            )
+                    },
+                    {
+                        label: t("resourcePoliciesAddRulesOnly"),
+                        onSelect: () =>
+                            startNavigation(() =>
+                                router.push(
+                                    `/${orgId}/settings/policies/resources/public/create?scope=rules-only`
+                                )
+                            )
+                    }
+                ]}
                 addButtonText={t("resourcePoliciesAdd")}
                 onRefresh={refreshData}
                 isRefreshing={isRefreshing || isFiltering}

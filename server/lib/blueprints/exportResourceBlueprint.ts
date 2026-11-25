@@ -13,6 +13,7 @@ import {
     resourcePassword,
     resourcePincode,
     resourcePolicies,
+    resourceRulePolicies,
     resourceRules,
     resources,
     resourceWhitelist,
@@ -140,57 +141,66 @@ async function buildPublicAuthAndRules(resource: {
         const [policyRow] = await db
             .select({ niceId: resourcePolicies.niceId })
             .from(resourcePolicies)
-            .where(eq(resourcePolicies.resourcePolicyId, resource.resourcePolicyId))
+            .where(
+                eq(resourcePolicies.resourcePolicyId, resource.resourcePolicyId)
+            )
             .limit(1);
 
-        const [roleRows, userRows, whitelistRows, ruleRows, passwordRow, pincodeRow, headerAuthRow] =
-            await Promise.all([
-                db
-                    .select({ name: roles.name })
-                    .from(roleResources)
-                    .innerJoin(
-                        roles,
-                        and(
-                            eq(roleResources.roleId, roles.roleId),
-                            or(isNull(roles.isAdmin), not(roles.isAdmin))
-                        )
+        const [
+            roleRows,
+            userRows,
+            whitelistRows,
+            ruleRows,
+            passwordRow,
+            pincodeRow,
+            headerAuthRow
+        ] = await Promise.all([
+            db
+                .select({ name: roles.name })
+                .from(roleResources)
+                .innerJoin(
+                    roles,
+                    and(
+                        eq(roleResources.roleId, roles.roleId),
+                        or(isNull(roles.isAdmin), not(roles.isAdmin))
                     )
-                    .where(eq(roleResources.resourceId, resource.resourceId)),
-                db
-                    .select({ username: users.username })
-                    .from(userResources)
-                    .innerJoin(users, eq(userResources.userId, users.userId))
-                    .where(eq(userResources.resourceId, resource.resourceId)),
-                db
-                    .select({ email: resourceWhitelist.email })
-                    .from(resourceWhitelist)
-                    .where(eq(resourceWhitelist.resourceId, resource.resourceId)),
-                db
-                    .select({
-                        enabled: resourceRules.enabled,
-                        priority: resourceRules.priority,
-                        action: resourceRules.action,
-                        match: resourceRules.match,
-                        value: resourceRules.value
-                    })
-                    .from(resourceRules)
-                    .where(eq(resourceRules.resourceId, resource.resourceId)),
-                db
-                    .select({ passwordId: resourcePassword.passwordId })
-                    .from(resourcePassword)
-                    .where(eq(resourcePassword.resourceId, resource.resourceId))
-                    .limit(1),
-                db
-                    .select({ pincodeId: resourcePincode.pincodeId })
-                    .from(resourcePincode)
-                    .where(eq(resourcePincode.resourceId, resource.resourceId))
-                    .limit(1),
-                db
-                    .select({ headerAuthId: resourceHeaderAuth.headerAuthId })
-                    .from(resourceHeaderAuth)
-                    .where(eq(resourceHeaderAuth.resourceId, resource.resourceId))
-                    .limit(1)
-            ]);
+                )
+                .where(eq(roleResources.resourceId, resource.resourceId)),
+            db
+                .select({ username: users.username })
+                .from(userResources)
+                .innerJoin(users, eq(userResources.userId, users.userId))
+                .where(eq(userResources.resourceId, resource.resourceId)),
+            db
+                .select({ email: resourceWhitelist.email })
+                .from(resourceWhitelist)
+                .where(eq(resourceWhitelist.resourceId, resource.resourceId)),
+            db
+                .select({
+                    enabled: resourceRules.enabled,
+                    priority: resourceRules.priority,
+                    action: resourceRules.action,
+                    match: resourceRules.match,
+                    value: resourceRules.value
+                })
+                .from(resourceRules)
+                .where(eq(resourceRules.resourceId, resource.resourceId)),
+            db
+                .select({ passwordId: resourcePassword.passwordId })
+                .from(resourcePassword)
+                .where(eq(resourcePassword.resourceId, resource.resourceId))
+                .limit(1),
+            db
+                .select({ pincodeId: resourcePincode.pincodeId })
+                .from(resourcePincode)
+                .where(eq(resourcePincode.resourceId, resource.resourceId))
+                .limit(1),
+            db
+                .select({ headerAuthId: resourceHeaderAuth.headerAuthId })
+                .from(resourceHeaderAuth)
+                .where(eq(resourceHeaderAuth.resourceId, resource.resourceId))
+                .limit(1)
+        ]);
 
         if (passwordRow.length > 0) {
             notes.push(
@@ -210,7 +220,9 @@ async function buildPublicAuthAndRules(resource: {
 
         const auth = stripUndefined({
             "sso-enabled": resource.sso ?? undefined,
-            "sso-roles": roleRows.length ? roleRows.map((r) => r.name) : undefined,
+            "sso-roles": roleRows.length
+                ? roleRows.map((r) => r.name)
+                : undefined,
             "sso-users": userRows.length
                 ? userRows.map((u) => u.username)
                 : undefined,
@@ -304,9 +316,10 @@ async function buildPublicAuthAndRules(resource: {
     };
 }
 
-async function buildAiProvidersAndBudget(input:
-    | { scope: "public"; resourceId: number }
-    | { scope: "site"; siteResourceId: number }
+async function buildAiProvidersAndBudget(
+    input:
+        | { scope: "public"; resourceId: number }
+        | { scope: "site"; siteResourceId: number }
 ) {
     const providers =
         input.scope === "public"
@@ -345,7 +358,10 @@ async function buildAiProvidersAndBudget(input:
                               .from(siteResourceAiModels)
                               .innerJoin(
                                   aiModels,
-                                  eq(siteResourceAiModels.modelId, aiModels.modelId)
+                                  eq(
+                                      siteResourceAiModels.modelId,
+                                      aiModels.modelId
+                                  )
                               )
                               .where(
                                   and(
@@ -493,9 +509,8 @@ export async function buildPublicResourceBlueprintConfig(
     }
 
     // Auth / rules / shared policy
-    const { policy, auth, rules, notes } = await buildPublicAuthAndRules(
-        resource
-    );
+    const { policy, auth, rules, notes } =
+        await buildPublicAuthAndRules(resource);
     if (policy) {
         resourceConfig.policy = policy;
     }
@@ -504,6 +519,38 @@ export async function buildPublicResourceBlueprintConfig(
     }
     if (rules.length > 0) {
         resourceConfig.rules = rules;
+    }
+
+    // Stacked access-rules-only policies. Like shared policies, these are
+    // referenced by niceId and are not bundled into the resource blueprint.
+    const stackedPolicyRows = await db
+        .select({
+            niceId: resourcePolicies.niceId,
+            position: resourceRulePolicies.position,
+            sortOrder: resourceRulePolicies.sortOrder,
+            enabled: resourceRulePolicies.enabled
+        })
+        .from(resourceRulePolicies)
+        .innerJoin(
+            resourcePolicies,
+            eq(
+                resourceRulePolicies.resourcePolicyId,
+                resourcePolicies.resourcePolicyId
+            )
+        )
+        .where(eq(resourceRulePolicies.resourceId, resourceId))
+        .orderBy(asc(resourceRulePolicies.sortOrder));
+
+    if (stackedPolicyRows.length > 0) {
+        resourceConfig["rule-policies"] = stackedPolicyRows.map((row) => ({
+            policy: row.niceId,
+            position: row.position,
+            "sort-order": row.sortOrder,
+            enabled: row.enabled
+        }));
+        notes.push(
+            "This resource has stacked access-rules-only policies. Policies are referenced by name and are not included in this blueprint; create them (scope: rules-only) before applying."
+        );
     }
 
     // Targets (all modes except inference use targets)
@@ -549,7 +596,7 @@ export async function buildPublicResourceBlueprintConfig(
         resourceConfig.targets = targetRows.map((row) =>
             stripUndefined({
                 site: row.siteNiceId ?? undefined,
-                method: mode === "http" ? row.method ?? undefined : undefined,
+                method: mode === "http" ? (row.method ?? undefined) : undefined,
                 hostname: row.ip,
                 port: row.port,
                 enabled: row.enabled,
@@ -683,7 +730,10 @@ export async function buildPrivateResourceBlueprintConfig(
         db
             .select({ niceId: clients.niceId })
             .from(clientSiteResources)
-            .innerJoin(clients, eq(clientSiteResources.clientId, clients.clientId))
+            .innerJoin(
+                clients,
+                eq(clientSiteResources.clientId, clients.clientId)
+            )
             .where(eq(clientSiteResources.siteResourceId, siteResourceId)),
         db
             .select({ name: labels.name })

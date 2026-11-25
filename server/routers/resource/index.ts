@@ -21,6 +21,7 @@ export * from "./createResourceRule";
 export * from "./deleteResourceRule";
 export * from "./listResourceRules";
 export * from "./updateResourceRule";
+export * from "./resourceRulePolicies";
 export * from "./getUserResources";
 export * from "./listUserResourceAliases";
 export * from "./setResourceHeaderAuth";

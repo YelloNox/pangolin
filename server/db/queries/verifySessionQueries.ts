@@ -36,12 +36,14 @@ import {
     ResourcePolicyHeaderAuth,
     resourceWhitelist,
     resourcePolicyWhiteList,
+    resourceRulePolicies,
     redirects,
     domains
 } from "@server/db";
 import { alias } from "@server/db";
 import { and, desc, eq, inArray, isNull, not, or, sql } from "drizzle-orm";
 import logger from "@server/logger";
+import { mergeResourceRules, StackedRule } from "@server/lib/resourceRuleMerge";
 import { pickResourceForHost } from "@server/lib/traefik/rule";
 
 export type ResourceWithAuth = {
@@ -320,10 +322,18 @@ export async function getResourceByDomain(
         selectedPolicy?.emailWhitelistEnabled ??
         result.resources.emailWhitelistEnabled;
 
+    // Stacked access-rules-only policies are an independent layer: they
+    // evaluate even when the base applyRules flag is off, so the matcher (and
+    // remote exit nodes, which gate on this value) must run whenever any
+    // enabled stack exists.
+    const stacks = await getResourceRuleStacks(result.resources.resourceId);
+    const hasEnabledStacks = stacks.before.length + stacks.after.length > 0;
+    const rulesGate = effectiveApplyRules || hasEnabledStacks;
+
     return {
         resource: {
             ...result.resources,
-            applyRules: effectiveApplyRules,
+            applyRules: rulesGate,
             sso: effectiveSSO,
             emailWhitelistEnabled: effectiveEmailWhitelistEnabled
         }, // doing this for backward compatability so the remote nodes get the value as part of the resource struct
@@ -338,7 +348,7 @@ export async function getResourceByDomain(
                       effectivePolicyHeaderAuth.extendedCompatibility
               } as ResourceHeaderAuthExtendedCompatibility)
             : result.resourceHeaderAuthExtendedCompatibility,
-        applyRules: effectiveApplyRules,
+        applyRules: rulesGate,
         sso: effectiveSSO,
         emailWhitelistEnabled: effectiveEmailWhitelistEnabled,
         org: result.orgs
@@ -487,58 +497,143 @@ export async function getUserResourceAccess(
 }
 
 /**
- * Get resource rules for a given resource (direct and via resource policy)
+ * Get the enabled stacked access-rules-only policies for a resource, split by
+ * position. Each rule carries the stack's sortOrder so the merge can order
+ * multiple stacks within a position group.
+ */
+export async function getResourceRuleStacks(resourceId: number): Promise<{
+    before: StackedRule<ResourceRule>[];
+    after: StackedRule<ResourceRule>[];
+}> {
+    const rows = await db
+        .select({
+            ruleId: resourcePolicyRules.ruleId,
+            resourceId: sql<number>`${resourceId}`,
+            enabled: resourcePolicyRules.enabled,
+            priority: resourcePolicyRules.priority,
+            action: resourcePolicyRules.action,
+            match: resourcePolicyRules.match,
+            value: resourcePolicyRules.value,
+            sortOrder: resourceRulePolicies.sortOrder,
+            position: resourceRulePolicies.position
+        })
+        .from(resourceRulePolicies)
+        .innerJoin(
+            resourcePolicyRules,
+            eq(
+                resourceRulePolicies.resourcePolicyId,
+                resourcePolicyRules.resourcePolicyId
+            )
+        )
+        .where(
+            and(
+                eq(resourceRulePolicies.resourceId, resourceId),
+                eq(resourceRulePolicies.enabled, true)
+            )
+        );
+
+    const before: StackedRule<ResourceRule>[] = [];
+    const after: StackedRule<ResourceRule>[] = [];
+    for (const row of rows) {
+        const { position, ...rule } = row;
+        if (position === "before") {
+            before.push(rule as StackedRule<ResourceRule>);
+        } else {
+            after.push(rule as StackedRule<ResourceRule>);
+        }
+    }
+    return { before, after };
+}
+
+/**
+ * Whether the resource's own rules (direct + assigned policy) evaluate: the
+ * shared policy's applyRules wins, then the default policy's, then the
+ * resource's own flag. Mirrors the effective-applyRules logic in
+ * getResourceByDomain.
+ */
+export async function getBaseEffectiveApplyRules(
+    resourceId: number
+): Promise<boolean> {
+    const [resource] = await db
+        .select()
+        .from(resources)
+        .where(eq(resources.resourceId, resourceId))
+        .limit(1);
+    if (!resource) {
+        return false;
+    }
+
+    const policyId =
+        resource.resourcePolicyId ?? resource.defaultResourcePolicyId;
+    if (policyId) {
+        const [policy] = await db
+            .select({ applyRules: resourcePolicies.applyRules })
+            .from(resourcePolicies)
+            .where(eq(resourcePolicies.resourcePolicyId, policyId))
+            .limit(1);
+        if (policy) {
+            return policy.applyRules;
+        }
+    }
+    return resource.applyRules;
+}
+
+/**
+ * Get resource rules for a given resource: direct rules, rules from the
+ * assigned policy, and any enabled stacked access-rules-only policies. The
+ * stacked policies are an independent layer that evaluates regardless of the
+ * resource's applyRules flag; the base rules only evaluate when it is on.
  */
 export async function getResourceRules(
     resourceId: number
 ): Promise<ResourceRule[]> {
-    const [directRules, policyRules] = await Promise.all([
-        db
-            .select()
-            .from(resourceRules)
-            .where(eq(resourceRules.resourceId, resourceId)),
-        db
-            .select({
-                ruleId: resourcePolicyRules.ruleId,
-                resourceId: sql<number>`${resourceId}`,
-                enabled: resourcePolicyRules.enabled,
-                priority: resourcePolicyRules.priority,
-                action: resourcePolicyRules.action,
-                match: resourcePolicyRules.match,
-                value: resourcePolicyRules.value
-            })
-            .from(resourcePolicyRules)
-            .innerJoin(
-                resources,
-                // Shared policy wins; only use default policy when no shared
-                // policy is assigned to the resource.
-                or(
-                    eq(
-                        resources.resourcePolicyId,
-                        resourcePolicyRules.resourcePolicyId
-                    ),
-                    and(
-                        isNull(resources.resourcePolicyId),
+    const [directRules, policyRules, stacks, includeBaseRules] =
+        await Promise.all([
+            db
+                .select()
+                .from(resourceRules)
+                .where(eq(resourceRules.resourceId, resourceId)),
+            db
+                .select({
+                    ruleId: resourcePolicyRules.ruleId,
+                    resourceId: sql<number>`${resourceId}`,
+                    enabled: resourcePolicyRules.enabled,
+                    priority: resourcePolicyRules.priority,
+                    action: resourcePolicyRules.action,
+                    match: resourcePolicyRules.match,
+                    value: resourcePolicyRules.value
+                })
+                .from(resourcePolicyRules)
+                .innerJoin(
+                    resources,
+                    // Shared policy wins; only use default policy when no shared
+                    // policy is assigned to the resource.
+                    or(
                         eq(
-                            resources.defaultResourcePolicyId,
+                            resources.resourcePolicyId,
                             resourcePolicyRules.resourcePolicyId
+                        ),
+                        and(
+                            isNull(resources.resourcePolicyId),
+                            eq(
+                                resources.defaultResourcePolicyId,
+                                resourcePolicyRules.resourcePolicyId
+                            )
                         )
                     )
                 )
-            )
-            .where(eq(resources.resourceId, resourceId))
-    ]);
+                .where(eq(resources.resourceId, resourceId)),
+            getResourceRuleStacks(resourceId),
+            getBaseEffectiveApplyRules(resourceId)
+        ]);
 
-    const maxDirectPriority = directRules.reduce(
-        (max, r) => Math.max(max, r.priority),
-        0
-    );
-    const offsetPolicyRules = policyRules.map((r) => ({
-        ...r,
-        priority: maxDirectPriority + r.priority
-    }));
-
-    return [...directRules, ...offsetPolicyRules] as ResourceRule[];
+    return mergeResourceRules({
+        stacksBefore: stacks.before,
+        direct: directRules,
+        policy: policyRules,
+        stacksAfter: stacks.after,
+        includeBaseRules
+    }) as ResourceRule[];
 }
 
 /**

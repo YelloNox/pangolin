@@ -388,6 +388,23 @@ export const PublicResourceSchema = z
         requestHeaders: z.array(HeaderSchema).optional(), // deprecated alias for request-headers
         responseHeaders: z.array(HeaderSchema).optional(), // deprecated alias for response-headers
         rules: z.array(RuleSchema).optional(),
+        // Access-rules-only policies stacked on top of this resource's own
+        // rules. Each entry references a policy key in "public-policies" whose
+        // scope is "rules-only".
+        "rule-policies": z
+            .array(
+                z.object({
+                    policy: z.string().min(1),
+                    position: z
+                        .enum(["before", "after"])
+                        .optional()
+                        .default("after"),
+                    "sort-order": z.int().min(0).optional().default(0),
+                    enabled: z.boolean().optional().default(true)
+                })
+            )
+            .optional()
+            .default([]),
         maintenance: MaintenanceSchema.optional(),
         mtls: MtlsSchema.optional(), // deprecated alias for auth.mtls
         "auth-daemon": AuthDaemonSchema.optional(),
@@ -908,6 +925,7 @@ export const ResourcePolicyRuleSchema = RuleSchema;
 export const ResourcePolicySchema = z
     .object({
         name: z.string().min(1).max(255),
+        scope: z.enum(["global", "rules-only"]).optional().default("global"),
         sso: z.boolean().optional().default(true),
         "auto-login-idp": z.int().positive().optional().nullable(),
         "sso-roles": z

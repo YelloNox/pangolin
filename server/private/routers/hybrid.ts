@@ -101,6 +101,7 @@ import { checkOrgAccessPolicy } from "@server/lib/checkOrgAccessPolicy";
 import { sanitizeString } from "@server/lib/sanitize";
 import {
     getRedirectsByHost,
+    getResourceRules,
     getWhitelistEmail,
     type RedirectByHost
 } from "@server/db/queries/verifySessionQueries";
@@ -1827,54 +1828,10 @@ hybridRouter.get(
                 );
             }
 
-            const [directRules, policyRules] = await Promise.all([
-                db
-                    .select()
-                    .from(resourceRules)
-                    .where(eq(resourceRules.resourceId, resourceId)),
-                db
-                    .select({
-                        ruleId: resourcePolicyRules.ruleId,
-                        resourceId: sql<number>`${resourceId}`,
-                        enabled: resourcePolicyRules.enabled,
-                        priority: resourcePolicyRules.priority,
-                        action: resourcePolicyRules.action,
-                        match: resourcePolicyRules.match,
-                        value: resourcePolicyRules.value
-                    })
-                    .from(resourcePolicyRules)
-                    .innerJoin(
-                        resources,
-                        or(
-                            eq(
-                                resources.resourcePolicyId,
-                                resourcePolicyRules.resourcePolicyId
-                            ),
-                            and(
-                                isNull(resources.resourcePolicyId),
-                                eq(
-                                    resources.defaultResourcePolicyId,
-                                    resourcePolicyRules.resourcePolicyId
-                                )
-                            )
-                        )
-                    )
-                    .where(eq(resources.resourceId, resourceId))
-            ]);
-
-            const maxDirectPriority = directRules.reduce(
-                (max, r) => Math.max(max, r.priority),
-                0
-            );
-            const offsetPolicyRules = policyRules.map((r) => ({
-                ...r,
-                priority: maxDirectPriority + r.priority
-            }));
-
-            const rules = [
-                ...directRules,
-                ...offsetPolicyRules
-            ] as (typeof resourceRules.$inferSelect)[];
+            // Same merge as the badger matcher: direct rules, the assigned
+            // policy's rules, and any enabled stacked access-rules-only
+            // policies (which evaluate even when applyRules is off).
+            const rules = await getResourceRules(resourceId);
 
             // Older exit nodes predate the rule matcher: rename COUNTRY back to
             // the legacy GEOIP name, and refuse to send match types the node has

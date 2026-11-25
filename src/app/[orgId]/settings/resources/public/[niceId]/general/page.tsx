@@ -52,8 +52,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import z from "zod";
 import { SharedPolicySelect } from "@app/components/shared-policy-selector";
+import { ResourceRulePoliciesPicker } from "@app/components/resource-policy/ResourceRulePoliciesSection";
 import { useOrgContext } from "@app/hooks/useOrgContext";
-import { orgQueries } from "@app/lib/queries";
+import { orgQueries, resourceQueries } from "@app/lib/queries";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
@@ -95,6 +96,21 @@ export default function GeneralForm() {
         }),
         enabled: hasResourcePolicies && selectedSharedPolicyId !== null
     });
+
+    // The policy that is in effect for this resource (shared, else its own).
+    // Stacked access-rules-only policies only make sense when the resource
+    // already has access rules of its own.
+    const { data: resourcePoliciesData } = useQuery({
+        ...resourceQueries.policies({ resourceId: resource.resourceId }),
+        enabled: hasResourcePolicies
+    });
+
+    const effectivePolicy =
+        resourcePoliciesData?.sharedPolicy ??
+        resourcePoliciesData?.defaultPolicy ??
+        null;
+
+    const hasResourceRules = (effectivePolicy?.rules?.length ?? 0) > 0;
 
     const [resourceFullDomain, setResourceFullDomain] = useState(
         `${resource.ssl ? "https" : "http"}://${toUnicode(resource.fullDomain || "")}`
@@ -667,6 +683,27 @@ export default function GeneralForm() {
                                                         </FormDescription>
                                                     </div>
                                                 </SettingsFormCell>
+                                                {hasResourceRules && (
+                                                    <SettingsFormCell span="half">
+                                                        <div className="space-y-2">
+                                                            <FormLabel>
+                                                                {t(
+                                                                    "resourceRulePoliciesTitle"
+                                                                )}
+                                                            </FormLabel>
+                                                            <FormDescription>
+                                                                {t(
+                                                                    "resourceRulePoliciesPickerDescription"
+                                                                )}
+                                                            </FormDescription>
+                                                            <ResourceRulePoliciesPicker
+                                                                resourceId={
+                                                                    resource.resourceId
+                                                                }
+                                                            />
+                                                        </div>
+                                                    </SettingsFormCell>
+                                                )}
                                             </>
                                         )}
                                     </SettingsFormGrid>

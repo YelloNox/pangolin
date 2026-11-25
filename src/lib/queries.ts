@@ -76,6 +76,7 @@ import type {
 import type { GetResourceResponse } from "@server/routers/resource/getResource";
 import type { GetResourceAuthInfoResponse } from "@server/routers/resource/getResourceAuthInfo";
 import type { ListResourcePoliciesResponse } from "@server/routers/resource/types";
+import type { ListResourceRulePoliciesResponse } from "@server/routers/resource/resourceRulePolicies";
 import type { ListRolesResponse } from "@server/routers/role";
 import type { ListSitesResponse } from "@server/routers/site";
 import type {
@@ -97,7 +98,7 @@ import {
     queryOptions
 } from "@tanstack/react-query";
 import { isAxiosError, type AxiosResponse } from "axios";
-import z from "zod";
+import z, { meta } from "zod";
 import { remote } from "./api";
 import { durationToMs } from "./durationToMs";
 
@@ -1812,6 +1813,17 @@ export const resourceQueries = {
                 const res = await meta!.api.get<
                     AxiosResponse<GetResourcePoliciesResponse>
                 >(`/resource/${resourceId}/policies`, { signal });
+
+                return res.data.data;
+            }
+        }),
+    rulePolicies: ({ resourceId }: { resourceId: number }) =>
+        queryOptions({
+            queryKey: ["RESOURCES", resourceId, "RULE_POLICIES"] as const,
+            queryFn: async ({ signal, meta }) => {
+                const res = await meta!.api.get<
+                    AxiosResponse<ListResourceRulePoliciesResponse>
+                >(`/resource/${resourceId}/rule-policies`, { signal });
 
                 return res.data.data;
             }

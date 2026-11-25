@@ -48,9 +48,12 @@ import { tierMatrix, TierFeature } from "@server/lib/billing/tierMatrix";
 
 // ─── CreatePolicyForm ─────────────────────────────────────────────────────────
 
-export type CreatePolicyFormProps = {};
+export type CreatePolicyFormProps = {
+    scope?: "global" | "rules-only";
+};
 
-export function CreatePolicyForm({}: CreatePolicyFormProps) {
+export function CreatePolicyForm({ scope = "global" }: CreatePolicyFormProps) {
+    const isRulesOnly = scope === "rules-only";
     const { org } = useOrgContext();
     const t = useTranslations();
     const { env } = useEnvContext();
@@ -83,6 +86,7 @@ export function CreatePolicyForm({}: CreatePolicyFormProps) {
         resolver: zodResolver(policySchema) as any,
         defaultValues: {
             name: "",
+            scope,
             sso: true,
             skipToIdpId: null,
             emailWhitelistEnabled: false,
@@ -112,8 +116,9 @@ export function CreatePolicyForm({}: CreatePolicyFormProps) {
                     `/org/${org.org.orgId}/resource-policy/`,
                     {
                         name: payload.name,
+                        scope: payload.scope,
                         // access control
-                        sso: payload.sso,
+                        sso: isRulesOnly ? false : payload.sso,
                         roleIds: payload.roles.map((r) => r.id),
                         userIds: payload.users.map((u) => u.id),
                         skipToIdpId: payload.skipToIdpId,
@@ -237,13 +242,15 @@ export function CreatePolicyForm({}: CreatePolicyFormProps) {
                             </SettingsSectionBody>
                         </SettingsSection>
 
-                        <PolicyAuthStackSection
-                            mode="create"
-                            form={form}
-                            orgId={org.org.orgId}
-                            allIdps={allIdps}
-                            emailEnabled={env.email.emailEnabled}
-                        />
+                        {!isRulesOnly && (
+                            <PolicyAuthStackSection
+                                mode="create"
+                                form={form}
+                                orgId={org.org.orgId}
+                                allIdps={allIdps}
+                                emailEnabled={env.email.emailEnabled}
+                            />
+                        )}
                         <PolicyAccessRulesSection
                             mode="create"
                             form={form}

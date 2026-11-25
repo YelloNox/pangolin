@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { db, resourcePolicyHeaderAuth } from "@server/db";
+import { rejectIfRulesOnlyPolicy } from "./resourcePolicyGuards";
 import { eq } from "drizzle-orm";
 import HttpCode from "@server/types/HttpCode";
 import createHttpError from "http-errors";
@@ -134,6 +135,8 @@ export async function setResourcePolicyHeaderAuth(
 
         const { resourcePolicyId } = parsedParams.data;
         const { headerAuth } = parsedBody.data;
+
+        if (await rejectIfRulesOnlyPolicy(resourcePolicyId, next)) return;
 
         const headerAuthHash =
             headerAuth !== null

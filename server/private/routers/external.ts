@@ -35,6 +35,7 @@ import * as eventStreamingDestination from "#private/routers/eventStreamingDesti
 import * as alertRule from "#private/routers/alertRule";
 import * as healthChecks from "#private/routers/healthChecks";
 import * as policy from "#private/routers/policy";
+import * as resource from "@server/routers/resource";
 import * as customDnsRecord from "#private/routers/customDnsRecord";
 import * as roleClientSettings from "#private/routers/roleClientSettings";
 import {
@@ -546,6 +547,47 @@ authenticated.post(
     verifyUserHasAction(ActionsEnum.createResourcePolicy),
     logActionAudit(ActionsEnum.createResourcePolicy),
     policy.createResourcePolicy
+);
+
+// Stacked access-rules-only policies. These layer a policy's rules on top of a
+// resource's existing rules (before or after) without replacing them, so they
+// are gated by the same subscription tier as resource policies.
+authenticated.get(
+    "/resource/:resourceId/rule-policies",
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyResourceAccess,
+    verifyUserHasAction(ActionsEnum.listResourceRules),
+    resource.listResourceRulePolicies
+);
+authenticated.put(
+    "/resource/:resourceId/rule-policies",
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyResourceAccess,
+    verifyLimits,
+    verifyUserHasAction(ActionsEnum.createResourceRule),
+    logActionAudit(ActionsEnum.createResourceRule),
+    resource.attachResourceRulePolicy
+);
+authenticated.post(
+    "/resource/:resourceId/rule-policies/:resourcePolicyId",
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyResourceAccess,
+    verifyLimits,
+    verifyUserHasAction(ActionsEnum.updateResourceRule),
+    logActionAudit(ActionsEnum.updateResourceRule),
+    resource.updateResourceRulePolicy
+);
+authenticated.delete(
+    "/resource/:resourceId/rule-policies/:resourcePolicyId",
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyResourceAccess,
+    verifyUserHasAction(ActionsEnum.deleteResourceRule),
+    logActionAudit(ActionsEnum.deleteResourceRule),
+    resource.detachResourceRulePolicy
 );
 
 authenticated.put(

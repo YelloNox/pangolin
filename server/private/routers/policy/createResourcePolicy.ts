@@ -75,6 +75,15 @@ const ruleSchema = z.strictObject({
 
 const createResourcePolicyBodySchema = z.strictObject({
     name: z.string().min(1).max(255),
+    scope: z
+        .enum(["global", "rules-only"])
+        .default("global")
+        .openapi({
+            type: "string",
+            enum: ["global", "rules-only"],
+            description:
+                '"rules-only" policies carry only access rules and can be stacked onto resources that already have a policy'
+        }),
     // Access control
     sso: z.boolean().default(true),
     skipToIdpId: z
@@ -213,6 +222,7 @@ export async function createResourcePolicy(
 
         const {
             name,
+            scope,
             sso,
             userIds,
             roleIds,
@@ -227,6 +237,30 @@ export async function createResourcePolicy(
             mtlsEnabled,
             mtlsCaCertificates
         } = parsedBody.data;
+
+        // A rules-only policy carries nothing but access rules, so reject auth
+        // settings up front instead of silently dropping them.
+        if (
+            scope === "rules-only" &&
+            (sso ||
+                userIds.length > 0 ||
+                roleIds.length > 0 ||
+                skipToIdpId ||
+                password ||
+                pincode ||
+                headerAuth ||
+                emailWhitelistEnabled ||
+                emails.length > 0 ||
+                mtlsEnabled ||
+                mtlsCaCertificates.length > 0)
+        ) {
+            return next(
+                createHttpError(
+                    HttpCode.BAD_REQUEST,
+                    "Access-rules-only policies do not accept authentication settings"
+                )
+            );
+        }
 
         // Validate the CA certificates up front so bad input is a 400
         const mtlsFingerprints = new Set<string>();
@@ -340,6 +374,7 @@ export async function createResourcePolicy(
                     niceId,
                     orgId,
                     name,
+                    scope,
                     sso,
                     idpId: skipToIdpId,
                     applyRules,

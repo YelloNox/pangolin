@@ -11,7 +11,12 @@
  * This file is not licensed under the AGPLv3.
  */
 
-import { db, resourcePolicies, resources } from "@server/db";
+import {
+    db,
+    resourcePolicies,
+    resourceRulePolicies,
+    resources
+} from "@server/db";
 import response from "@server/lib/response";
 import logger from "@server/logger";
 import { OpenAPITags, registry } from "@server/openApi";
@@ -77,7 +82,18 @@ export async function deleteResourcePolicy(
                 .where(eq(resources.resourcePolicyId, resourcePolicyId))
         );
 
-        if (totalAffectedResources > 0) {
+        // A rules-only policy is attached through the stack table instead of
+        // resources.resourcePolicyId, so it needs its own usage check.
+        const totalStackedResources = await db.$count(
+            db
+                .select()
+                .from(resourceRulePolicies)
+                .where(
+                    eq(resourceRulePolicies.resourcePolicyId, resourcePolicyId)
+                )
+        );
+
+        if (totalAffectedResources > 0 || totalStackedResources > 0) {
             return next(
                 createHttpError(
                     HttpCode.FORBIDDEN,

@@ -12,3 +12,6 @@
  */
 
 export * from "./getMaintenanceInfo";
+// Stacked access-rules-only policy endpoints live in the OSS router and are
+// re-exported here so the enterprise integration API can register them.
+export * from "@server/routers/resource/resourceRulePolicies";

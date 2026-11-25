@@ -455,6 +455,58 @@ authenticated.delete(
     policy.deleteResourcePolicy
 );
 
+// Stacked access-rules-only policies (see external.ts). Gated by the same
+// subscription tier as resource policies.
+authenticated.get(
+    [
+        "/resource/:resourceId/rule-policies",
+        "/public-resource/:resourceId/rule-policies"
+    ],
+    verifyApiKeyResourceAccess,
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyApiKeyHasAction(ActionsEnum.listResourceRules),
+    resource.listResourceRulePolicies
+);
+authenticated.put(
+    [
+        "/resource/:resourceId/rule-policies",
+        "/public-resource/:resourceId/rule-policies"
+    ],
+    verifyApiKeyResourceAccess,
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyLimits,
+    verifyApiKeyHasAction(ActionsEnum.createResourceRule),
+    logActionAudit(ActionsEnum.createResourceRule),
+    resource.attachResourceRulePolicy
+);
+authenticated.post(
+    [
+        "/resource/:resourceId/rule-policies/:resourcePolicyId",
+        "/public-resource/:resourceId/rule-policies/:resourcePolicyId"
+    ],
+    verifyApiKeyResourceAccess,
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyLimits,
+    verifyApiKeyHasAction(ActionsEnum.updateResourceRule),
+    logActionAudit(ActionsEnum.updateResourceRule),
+    resource.updateResourceRulePolicy
+);
+authenticated.delete(
+    [
+        "/resource/:resourceId/rule-policies/:resourcePolicyId",
+        "/public-resource/:resourceId/rule-policies/:resourcePolicyId"
+    ],
+    verifyApiKeyResourceAccess,
+    verifyValidLicense,
+    verifyValidSubscription(tierMatrix.resourcePolicies),
+    verifyApiKeyHasAction(ActionsEnum.deleteResourceRule),
+    logActionAudit(ActionsEnum.deleteResourceRule),
+    resource.detachResourceRulePolicy
+);
+
 authenticated.put(
     "/org/:orgId/event-streaming-destination",
     verifyApiKeyOrgAccess,

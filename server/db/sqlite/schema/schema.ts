@@ -1586,6 +1586,34 @@ export const resourcePolicyRules = sqliteTable("resourcePolicyRules", {
     value: text("value").notNull()
 });
 
+export const resourceRulePolicies = sqliteTable(
+    "resourceRulePolicies",
+    {
+        id: integer("id").primaryKey({ autoIncrement: true }),
+        resourceId: integer("resourceId")
+            .notNull()
+            .references(() => resources.resourceId, { onDelete: "cascade" }),
+        resourcePolicyId: integer("resourcePolicyId")
+            .notNull()
+            .references(() => resourcePolicies.resourcePolicyId, {
+                onDelete: "cascade"
+            }),
+        position: text("position")
+            .$type<"before" | "after">()
+            .notNull()
+            .default("after"),
+        sortOrder: integer("sortOrder").notNull().default(0),
+        enabled: integer("enabled", { mode: "boolean" }).notNull().default(true)
+    },
+    (t) => [
+        index("idx_resourcerulepolicies_resourceid").on(t.resourceId),
+        uniqueIndex("uq_resourcerulepolicies_resource_policy").on(
+            t.resourceId,
+            t.resourcePolicyId
+        )
+    ]
+);
+
 export const resourcePolicies = sqliteTable("resourcePolicies", {
     resourcePolicyId: integer("resourcePolicyId").primaryKey(),
     sso: integer("sso", { mode: "boolean" }).notNull().default(true),
@@ -1593,7 +1621,7 @@ export const resourcePolicies = sqliteTable("resourcePolicies", {
         .notNull()
         .default(false),
     scope: text("scope")
-        .$type<"global" | "resource">()
+        .$type<"global" | "resource" | "rules-only">()
         .notNull()
         .default("global"),
     emailWhitelistEnabled: integer("emailWhitelistEnabled", { mode: "boolean" })
@@ -2271,6 +2299,7 @@ export type StatusHistory = InferSelectModel<typeof statusHistory>;
 export type Label = InferSelectModel<typeof labels>;
 export type LauncherView = InferSelectModel<typeof launcherViews>;
 export type ResourcePolicy = InferSelectModel<typeof resourcePolicies>;
+export type ResourceRulePolicy = InferSelectModel<typeof resourceRulePolicies>;
 export type ResourcePolicyPincode = InferSelectModel<
     typeof resourcePolicyPincode
 >;

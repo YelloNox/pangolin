@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { db } from "@server/db";
 import { resourcePolicyPassword } from "@server/db";
+import { rejectIfRulesOnlyPolicy } from "./resourcePolicyGuards";
 import { eq } from "drizzle-orm";
 import HttpCode from "@server/types/HttpCode";
 import createHttpError from "http-errors";
@@ -129,6 +130,8 @@ export async function setResourcePolicyPassword(
 
         const { resourcePolicyId } = parsedParams.data;
         const { password } = parsedBody.data;
+
+        if (await rejectIfRulesOnlyPolicy(resourcePolicyId, next)) return;
 
         await db.transaction(async (trx) => {
             await trx

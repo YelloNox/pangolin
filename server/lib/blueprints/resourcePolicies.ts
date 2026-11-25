@@ -85,6 +85,10 @@ export async function updateResourcePolicies(
 
         const mtls = policyData.mtls as BlueprintMtls | undefined;
 
+        // A rules-only policy carries nothing but access rules: no SSO, users,
+        // roles, password, pincode, header auth, whitelist, or mTLS.
+        const isRulesOnly = policyData.scope === "rules-only";
+
         // Look up the admin role
         const [adminRole] = await trx
             .select()
@@ -116,15 +120,19 @@ export async function updateResourcePolicies(
                 .update(resourcePolicies)
                 .set({
                     name: policyData.name,
-                    sso: policyData.sso ?? true,
-                    idpId: policyData["auto-login-idp"] ?? null,
-                    emailWhitelistEnabled:
-                        policyData["email-whitelist-enabled"] ??
-                        policyData["whitelist-users"].length > 0,
+                    scope: policyData.scope ?? "global",
+                    sso: isRulesOnly ? false : (policyData.sso ?? true),
+                    idpId: isRulesOnly
+                        ? null
+                        : (policyData["auto-login-idp"] ?? null),
+                    emailWhitelistEnabled: isRulesOnly
+                        ? false
+                        : (policyData["email-whitelist-enabled"] ??
+                          policyData["whitelist-users"].length > 0),
                     applyRules:
                         policyData["apply-rules"] ||
                         policyData.rules.length > 0,
-                    mtlsEnabled: mtls?.enabled
+                    mtlsEnabled: isRulesOnly ? false : mtls?.enabled
                 })
                 .where(
                     eq(
@@ -135,46 +143,25 @@ export async function updateResourcePolicies(
 
             resourcePolicyId = existingPolicy.resourcePolicyId;
 
-            // Sync password
-            await trx
-                .delete(resourcePolicyPassword)
-                .where(
-                    eq(
-                        resourcePolicyPassword.resourcePolicyId,
-                        resourcePolicyId
-                    )
-                );
-            if (policyData.password) {
-                const passwordHash = await hashPassword(policyData.password);
-                await trx.insert(resourcePolicyPassword).values({
-                    resourcePolicyId,
-                    passwordHash
-                });
-            }
-
-            // Sync pincode
-            await trx
-                .delete(resourcePolicyPincode)
-                .where(
-                    eq(resourcePolicyPincode.resourcePolicyId, resourcePolicyId)
-                );
-            if (policyData.pincode) {
-                const pincodeHash = await hashPassword(policyData.pincode);
-                await trx.insert(resourcePolicyPincode).values({
-                    resourcePolicyId,
-                    pincodeHash,
-                    digitLength: 6
-                });
-            }
-
-            // Sync header auth (hash before delete so delete+insert stay adjacent)
-            if (policyData["basic-auth"]) {
-                const basicAuth = policyData["basic-auth"];
-                const headerAuthHash = await hashPassword(
-                    Buffer.from(
-                        `${basicAuth.user}:${basicAuth.password}`
-                    ).toString("base64")
-                );
+            if (isRulesOnly) {
+                // Clear any auth data a previous global policy left behind so
+                // the policy carries nothing but rules.
+                await trx
+                    .delete(resourcePolicyPassword)
+                    .where(
+                        eq(
+                            resourcePolicyPassword.resourcePolicyId,
+                            resourcePolicyId
+                        )
+                    );
+                await trx
+                    .delete(resourcePolicyPincode)
+                    .where(
+                        eq(
+                            resourcePolicyPincode.resourcePolicyId,
+                            resourcePolicyId
+                        )
+                    );
                 await trx
                     .delete(resourcePolicyHeaderAuth)
                     .where(
@@ -183,46 +170,115 @@ export async function updateResourcePolicies(
                             resourcePolicyId
                         )
                     );
-                await trx.insert(resourcePolicyHeaderAuth).values({
-                    resourcePolicyId,
-                    headerAuthHash,
-                    extendedCompatibility:
-                        basicAuth["extended-compatibility"] ?? true
-                });
+                await trx
+                    .delete(resourcePolicyWhiteList)
+                    .where(
+                        eq(
+                            resourcePolicyWhiteList.resourcePolicyId,
+                            resourcePolicyId
+                        )
+                    );
+                await trx
+                    .delete(rolePolicies)
+                    .where(eq(rolePolicies.resourcePolicyId, resourcePolicyId));
+                await trx
+                    .delete(userPolicies)
+                    .where(eq(userPolicies.resourcePolicyId, resourcePolicyId));
             } else {
+                // Sync password
                 await trx
-                    .delete(resourcePolicyHeaderAuth)
+                    .delete(resourcePolicyPassword)
                     .where(
                         eq(
-                            resourcePolicyHeaderAuth.resourcePolicyId,
+                            resourcePolicyPassword.resourcePolicyId,
                             resourcePolicyId
                         )
                     );
+                if (policyData.password) {
+                    const passwordHash = await hashPassword(
+                        policyData.password
+                    );
+                    await trx.insert(resourcePolicyPassword).values({
+                        resourcePolicyId,
+                        passwordHash
+                    });
+                }
+
+                // Sync pincode
+                await trx
+                    .delete(resourcePolicyPincode)
+                    .where(
+                        eq(
+                            resourcePolicyPincode.resourcePolicyId,
+                            resourcePolicyId
+                        )
+                    );
+                if (policyData.pincode) {
+                    const pincodeHash = await hashPassword(policyData.pincode);
+                    await trx.insert(resourcePolicyPincode).values({
+                        resourcePolicyId,
+                        pincodeHash,
+                        digitLength: 6
+                    });
+                }
+
+                // Sync header auth (hash before delete so delete+insert stay adjacent)
+                if (policyData["basic-auth"]) {
+                    const basicAuth = policyData["basic-auth"];
+                    const headerAuthHash = await hashPassword(
+                        Buffer.from(
+                            `${basicAuth.user}:${basicAuth.password}`
+                        ).toString("base64")
+                    );
+                    await trx
+                        .delete(resourcePolicyHeaderAuth)
+                        .where(
+                            eq(
+                                resourcePolicyHeaderAuth.resourcePolicyId,
+                                resourcePolicyId
+                            )
+                        );
+                    await trx.insert(resourcePolicyHeaderAuth).values({
+                        resourcePolicyId,
+                        headerAuthHash,
+                        extendedCompatibility:
+                            basicAuth["extended-compatibility"] ?? true
+                    });
+                } else {
+                    await trx
+                        .delete(resourcePolicyHeaderAuth)
+                        .where(
+                            eq(
+                                resourcePolicyHeaderAuth.resourcePolicyId,
+                                resourcePolicyId
+                            )
+                        );
+                }
+
+                // Sync SSO roles
+                await syncRolePolicies(
+                    resourcePolicyId,
+                    policyData["sso-roles"],
+                    orgId,
+                    adminRole.roleId,
+                    trx
+                );
+
+                // Sync SSO users
+                await syncUserPolicies(
+                    resourcePolicyId,
+                    policyData["sso-users"],
+                    orgId,
+                    trx
+                );
+
+                // Sync whitelist users
+                await syncWhitelistPolicyUsers(
+                    resourcePolicyId,
+                    policyData["whitelist-users"],
+                    trx
+                );
             }
-
-            // Sync SSO roles
-            await syncRolePolicies(
-                resourcePolicyId,
-                policyData["sso-roles"],
-                orgId,
-                adminRole.roleId,
-                trx
-            );
-
-            // Sync SSO users
-            await syncUserPolicies(
-                resourcePolicyId,
-                policyData["sso-users"],
-                orgId,
-                trx
-            );
-
-            // Sync whitelist users
-            await syncWhitelistPolicyUsers(
-                resourcePolicyId,
-                policyData["whitelist-users"],
-                trx
-            );
 
             // Sync rules
             await syncPolicyRules(resourcePolicyId, policyData.rules, trx);
@@ -238,87 +294,94 @@ export async function updateResourcePolicies(
                     niceId: policyNiceId,
                     orgId,
                     name: policyData.name,
-                    sso: policyData.sso ?? true,
-                    idpId: policyData["auto-login-idp"] ?? null,
-                    emailWhitelistEnabled:
-                        policyData["email-whitelist-enabled"] ??
-                        policyData["whitelist-users"].length > 0,
+                    sso: isRulesOnly ? false : (policyData.sso ?? true),
+                    idpId: isRulesOnly
+                        ? null
+                        : (policyData["auto-login-idp"] ?? null),
+                    emailWhitelistEnabled: isRulesOnly
+                        ? false
+                        : (policyData["email-whitelist-enabled"] ??
+                          policyData["whitelist-users"].length > 0),
                     applyRules:
                         policyData["apply-rules"] ||
                         policyData.rules.length > 0,
-                    mtlsEnabled: mtls?.enabled ?? false,
-                    scope: "global"
+                    mtlsEnabled: isRulesOnly ? false : (mtls?.enabled ?? false),
+                    scope: policyData.scope ?? "global"
                 })
                 .returning();
 
             resourcePolicyId = newPolicy.resourcePolicyId;
 
-            // Always add admin role
-            await trx.insert(rolePolicies).values({
-                roleId: adminRole.roleId,
-                resourcePolicyId
-            });
-
-            // Add SSO roles
-            await addRolePolicies(
-                resourcePolicyId,
-                policyData["sso-roles"],
-                orgId,
-                adminRole.roleId,
-                trx
-            );
-
-            // Add SSO users
-            await addUserPolicies(
-                resourcePolicyId,
-                policyData["sso-users"],
-                orgId,
-                trx
-            );
-
-            // Add password
-            if (policyData.password) {
-                const passwordHash = await hashPassword(policyData.password);
-                await trx.insert(resourcePolicyPassword).values({
-                    resourcePolicyId,
-                    passwordHash
+            if (!isRulesOnly) {
+                // Always add admin role
+                await trx.insert(rolePolicies).values({
+                    roleId: adminRole.roleId,
+                    resourcePolicyId
                 });
-            }
 
-            // Add pincode
-            if (policyData.pincode) {
-                const pincodeHash = await hashPassword(policyData.pincode);
-                await trx.insert(resourcePolicyPincode).values({
+                // Add SSO roles
+                await addRolePolicies(
                     resourcePolicyId,
-                    pincodeHash,
-                    digitLength: 6
-                });
-            }
-
-            // Add header auth
-            if (policyData["basic-auth"]) {
-                const basicAuth = policyData["basic-auth"];
-                const headerAuthHash = await hashPassword(
-                    Buffer.from(
-                        `${basicAuth.user}:${basicAuth.password}`
-                    ).toString("base64")
+                    policyData["sso-roles"],
+                    orgId,
+                    adminRole.roleId,
+                    trx
                 );
-                await trx.insert(resourcePolicyHeaderAuth).values({
-                    resourcePolicyId,
-                    headerAuthHash,
-                    extendedCompatibility:
-                        basicAuth["extended-compatibility"] ?? true
-                });
-            }
 
-            // Add whitelist users
-            if (policyData["whitelist-users"].length > 0) {
-                await trx.insert(resourcePolicyWhiteList).values(
-                    policyData["whitelist-users"].map((email) => ({
-                        email,
-                        resourcePolicyId
-                    }))
+                // Add SSO users
+                await addUserPolicies(
+                    resourcePolicyId,
+                    policyData["sso-users"],
+                    orgId,
+                    trx
                 );
+
+                // Add password
+                if (policyData.password) {
+                    const passwordHash = await hashPassword(
+                        policyData.password
+                    );
+                    await trx.insert(resourcePolicyPassword).values({
+                        resourcePolicyId,
+                        passwordHash
+                    });
+                }
+
+                // Add pincode
+                if (policyData.pincode) {
+                    const pincodeHash = await hashPassword(policyData.pincode);
+                    await trx.insert(resourcePolicyPincode).values({
+                        resourcePolicyId,
+                        pincodeHash,
+                        digitLength: 6
+                    });
+                }
+
+                // Add header auth
+                if (policyData["basic-auth"]) {
+                    const basicAuth = policyData["basic-auth"];
+                    const headerAuthHash = await hashPassword(
+                        Buffer.from(
+                            `${basicAuth.user}:${basicAuth.password}`
+                        ).toString("base64")
+                    );
+                    await trx.insert(resourcePolicyHeaderAuth).values({
+                        resourcePolicyId,
+                        headerAuthHash,
+                        extendedCompatibility:
+                            basicAuth["extended-compatibility"] ?? true
+                    });
+                }
+
+                // Add whitelist users
+                if (policyData["whitelist-users"].length > 0) {
+                    await trx.insert(resourcePolicyWhiteList).values(
+                        policyData["whitelist-users"].map((email) => ({
+                            email,
+                            resourcePolicyId
+                        }))
+                    );
+                }
             }
 
             // Add rules

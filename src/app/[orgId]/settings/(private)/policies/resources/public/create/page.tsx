@@ -6,20 +6,32 @@ import Link from "next/link";
 
 export interface CreateResourcePolicyPageProps {
     params: Promise<{ orgId: string }>;
+    searchParams: Promise<Record<string, string>>;
 }
 
 export default async function CreateResourcePolicyPage(
     props: CreateResourcePolicyPageProps
 ) {
     const params = await props.params;
+    const searchParams = await props.searchParams;
     const t = await getTranslations();
+
+    const scope = searchParams.scope === "rules-only" ? "rules-only" : "global";
 
     return (
         <>
             <div className="flex justify-between">
                 <SettingsSectionTitle
-                    title={t("resourcePoliciesCreate")}
-                    description={t("resourcePoliciesCreateDescription")}
+                    title={
+                        scope === "rules-only"
+                            ? t("resourcePoliciesCreateRulesOnly")
+                            : t("resourcePoliciesCreate")
+                    }
+                    description={
+                        scope === "rules-only"
+                            ? t("resourcePoliciesCreateRulesOnlyDescription")
+                            : t("resourcePoliciesCreateDescription")
+                    }
                 />
 
                 <Button asChild variant="outline">
@@ -31,7 +43,7 @@ export default async function CreateResourcePolicyPage(
                 </Button>
             </div>
 
-            <CreatePolicyForm />
+            <CreatePolicyForm scope={scope} />
         </>
     );
 }

@@ -14,6 +14,7 @@
 import {
     db,
     resourcePolicies,
+    resourceRulePolicies,
     resources,
     rolePolicies,
     userPolicies
@@ -70,7 +71,8 @@ function queryResourcePoliciesBase() {
             resourcePolicyId: resourcePolicies.resourcePolicyId,
             name: resourcePolicies.name,
             niceId: resourcePolicies.niceId,
-            orgId: resourcePolicies.orgId
+            orgId: resourcePolicies.orgId,
+            scope: resourcePolicies.scope
         })
         .from(resourcePolicies);
 }
@@ -178,7 +180,9 @@ export async function listResourcePolicies(
                     accessibleResourceIds
                 ),
                 eq(resourcePolicies.orgId, orgId),
-                eq(resourcePolicies.scope, "global")
+                // The shared policies page lists normal policies and the
+                // access-rules-only ones that can be stacked onto resources.
+                inArray(resourcePolicies.scope, ["global", "rules-only"])
             )
         ];
 
@@ -229,6 +233,40 @@ export async function listResourcePolicies(
                           )
                       );
 
+        // Rules-only policies attach through the stack table, not
+        // resources.resourcePolicyId, so list their resources from there.
+        const stackedResources =
+            rows.length === 0
+                ? []
+                : await db
+                      .select({
+                          resourceId: resources.resourceId,
+                          niceId: resources.niceId,
+                          name: resources.name,
+                          fullDomain: resources.fullDomain,
+                          resourcePolicyId:
+                              resourceRulePolicies.resourcePolicyId
+                      })
+                      .from(resourceRulePolicies)
+                      .innerJoin(
+                          resources,
+                          eq(
+                              resources.resourceId,
+                              resourceRulePolicies.resourceId
+                          )
+                      )
+                      .where(
+                          inArray(
+                              resourceRulePolicies.resourcePolicyId,
+                              rows.map((row) => row.resourcePolicyId)
+                          )
+                      );
+
+        const allAttachedResources = [
+            ...attachedResources,
+            ...stackedResources
+        ];
+
         // avoids TS issues with reduce/never[]
         const map = new Map<number, ResourcePolicyWithResources>();
 
@@ -242,7 +280,7 @@ export async function listResourcePolicies(
                 map.set(row.resourcePolicyId, entry);
             }
 
-            entry.resources = attachedResources.filter(
+            entry.resources = allAttachedResources.filter(
                 (r) => r.resourcePolicyId === entry?.resourcePolicyId
             );
         }

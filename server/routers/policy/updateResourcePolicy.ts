@@ -178,6 +178,15 @@ export async function updateResourcePolicy(
             }
         }
 
+        if (updateData.mtlsEnabled === true && policy.scope === "rules-only") {
+            return next(
+                createHttpError(
+                    HttpCode.BAD_REQUEST,
+                    "Access-rules-only policies do not support authentication settings"
+                )
+            );
+        }
+
         if (updateData.mtlsEnabled === true) {
             const certificateCount = await countMtlsCertificates({
                 type: "policy",

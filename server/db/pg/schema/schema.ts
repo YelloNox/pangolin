@@ -1273,6 +1273,34 @@ export const resourcePolicyRules = pgTable("resourcePolicyRules", {
     value: varchar("value").notNull()
 });
 
+export const resourceRulePolicies = pgTable(
+    "resourceRulePolicies",
+    {
+        id: serial("id").primaryKey(),
+        resourceId: integer("resourceId")
+            .notNull()
+            .references(() => resources.resourceId, { onDelete: "cascade" }),
+        resourcePolicyId: integer("resourcePolicyId")
+            .notNull()
+            .references(() => resourcePolicies.resourcePolicyId, {
+                onDelete: "cascade"
+            }),
+        position: varchar("position")
+            .$type<"before" | "after">()
+            .notNull()
+            .default("after"),
+        sortOrder: integer("sortOrder").notNull().default(0),
+        enabled: boolean("enabled").notNull().default(true)
+    },
+    (t) => [
+        index("idx_resourcerulepolicies_resourceid").on(t.resourceId),
+        uniqueIndex("uq_resourcerulepolicies_resource_policy").on(
+            t.resourceId,
+            t.resourcePolicyId
+        )
+    ]
+);
+
 export const resourcePolicies = pgTable(
     "resourcePolicies",
     {
@@ -1280,7 +1308,7 @@ export const resourcePolicies = pgTable(
         sso: boolean("sso").notNull().default(true),
         applyRules: boolean("applyRules").notNull().default(false),
         scope: varchar("scope")
-            .$type<"global" | "resource">()
+            .$type<"global" | "resource" | "rules-only">()
             .notNull()
             .default("global"),
         emailWhitelistEnabled: boolean("emailWhitelistEnabled")
@@ -2217,6 +2245,7 @@ export type StatusHistory = InferSelectModel<typeof statusHistory>;
 export type Label = InferSelectModel<typeof labels>;
 export type LauncherView = InferSelectModel<typeof launcherViews>;
 export type ResourcePolicy = InferSelectModel<typeof resourcePolicies>;
+export type ResourceRulePolicy = InferSelectModel<typeof resourceRulePolicies>;
 export type RolePolicy = InferSelectModel<typeof rolePolicies>;
 export type UserPolicy = InferSelectModel<typeof userPolicies>;
 export type ResourcePolicyRule = InferSelectModel<typeof resourcePolicyRules>;
