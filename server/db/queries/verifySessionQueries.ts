@@ -575,7 +575,7 @@ export async function getBaseEffectiveApplyRules(
             return policy.applyRules;
         }
     }
-    return resource.applyRules;
+    return resource.applyRules ?? false;
 }
 
 /**

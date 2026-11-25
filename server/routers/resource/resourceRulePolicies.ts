@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
     db,
     resourcePolicies,
-    resourcePolicies,
     resourcePolicyRules,
     resourceRulePolicies,
     resources
