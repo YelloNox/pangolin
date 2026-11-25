@@ -3901,5 +3901,7 @@
     "redirectPermanentDescription": "Respond with 308 instead of 307. Permanent redirects are cached by browsers.",
     "redirectSslDescription": "Serve this redirect over HTTPS. Turn off to match requests on plain HTTP.",
     "rulesErrorInvalidMethodDescription": "Select at least one HTTP method.",
-    "rulesSelectMethods": "Select methods"
+    "rulesSelectCountries": "Select countries",
+    "rulesSelectMethods": "Select methods",
+    "rulesSelectRegions": "Select regions"
 }

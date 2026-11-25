@@ -1696,9 +1696,13 @@ async function checkRules(
             clientIp &&
             (rule.match === "COUNTRY" || rule.match === "COUNTRY_IS_NOT")
         ) {
-            // COUNTRY=ALL should not affect local/private/CGNAT addresses.
+            // COUNTRY containing ALL should not affect local/private/CGNAT addresses.
+            const countryCodes = rule.value
+                .split(",")
+                .map((c) => c.trim().toUpperCase())
+                .filter(Boolean);
             if (
-                rule.value.toUpperCase() === "ALL" &&
+                countryCodes.includes("ALL") &&
                 isLocalOrCarrierGradeNatIp(clientIp)
             ) {
                 continue;
@@ -1749,15 +1753,27 @@ function isMethodAllowed(ruleValue: string, method: string): boolean {
 
 export { isPathAllowed };
 
+// rule.value holds a comma-separated list of country codes, e.g. "US,DE".
+// A single code like "US" is also valid (legacy).
 async function isIpInGeoIP(
     ipCountryCode: string | undefined,
-    checkCountryCode: string
+    checkCountryCodes: string
 ): Promise<boolean> {
-    if (checkCountryCode == "ALL") {
+    const codes = checkCountryCodes
+        .split(",")
+        .map((c) => c.trim().toUpperCase())
+        .filter(Boolean);
+
+    if (codes.includes("ALL")) {
         return true;
     }
 
-    return ipCountryCode?.toUpperCase() === checkCountryCode.toUpperCase();
+    if (!ipCountryCode) {
+        return false;
+    }
+
+    const upper = ipCountryCode.toUpperCase();
+    return codes.includes(upper);
 }
 
 function isLocalOrCarrierGradeNatIp(ip: string): boolean {
@@ -1810,50 +1826,51 @@ async function isIpInAsn(
     return match;
 }
 
+// rule.value holds a comma-separated list of region IDs, e.g. "150,151".
+// A single ID like "150" is also valid (legacy).
 export async function isIpInRegion(
     ipCountryCode: string | undefined,
-    checkRegionCode: string
+    checkRegionCodes: string
 ): Promise<boolean> {
     if (!ipCountryCode) {
         return false;
     }
 
     const upperCode = ipCountryCode.toUpperCase();
+    const regionIds = checkRegionCodes
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
 
-    for (const region of REGIONS) {
-        // Check if it's a top-level region (continent)
-        if (region.id === checkRegionCode) {
-            for (const subregion of region.includes) {
-                if (subregion.countries.includes(upperCode)) {
-                    logger.debug(
-                        `Country ${upperCode} is in region ${region.id} (${region.name})`
-                    );
-                    return true;
+    for (const regionId of regionIds) {
+        for (const region of REGIONS) {
+            // Check if it's a top-level region (continent)
+            if (region.id === regionId) {
+                for (const subregion of region.includes) {
+                    if (subregion.countries.includes(upperCode)) {
+                        logger.debug(
+                            `Country ${upperCode} is in region ${region.id} (${region.name})`
+                        );
+                        return true;
+                    }
                 }
             }
-            logger.debug(
-                `Country ${upperCode} is not in region ${region.id} (${region.name})`
-            );
-            return false;
-        }
 
-        // Check subregions
-        for (const subregion of region.includes) {
-            if (subregion.id === checkRegionCode) {
-                if (subregion.countries.includes(upperCode)) {
-                    logger.debug(
-                        `Country ${upperCode} is in region ${subregion.id} (${subregion.name})`
-                    );
-                    return true;
+            // Check subregions
+            for (const subregion of region.includes) {
+                if (subregion.id === regionId) {
+                    if (subregion.countries.includes(upperCode)) {
+                        logger.debug(
+                            `Country ${upperCode} is in region ${subregion.id} (${subregion.name})`
+                        );
+                        return true;
+                    }
                 }
-                logger.debug(
-                    `Country ${upperCode} is not in region ${subregion.id} (${subregion.name})`
-                );
-                return false;
             }
         }
     }
 
+    logger.debug(`Country ${upperCode} is not in any of regions: ${regionIds.join(", ")}`);
     return false;
 }
 

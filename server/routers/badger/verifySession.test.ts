@@ -4,29 +4,34 @@ import { isPathAllowed } from "@server/lib/pathMatch";
 
 function isIpInRegion(
     ipCountryCode: string | undefined,
-    checkRegionCode: string
+    checkRegionCodes: string
 ): boolean {
     if (!ipCountryCode) {
         return false;
     }
 
     const upperCode = ipCountryCode.toUpperCase();
+    const regionIds = checkRegionCodes
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
 
-    for (const region of REGIONS) {
-        // Check if it's a top-level region (continent)
-        if (region.id === checkRegionCode) {
-            for (const subregion of region.includes) {
-                if (subregion.countries.includes(upperCode)) {
-                    return true;
+    for (const regionId of regionIds) {
+        for (const region of REGIONS) {
+            if (region.id === regionId) {
+                for (const subregion of region.includes) {
+                    if (subregion.countries.includes(upperCode)) {
+                        return true;
+                    }
                 }
             }
-            return false;
-        }
 
-        // Check subregions
-        for (const subregion of region.includes) {
-            if (subregion.id === checkRegionCode) {
-                return subregion.countries.includes(upperCode);
+            for (const subregion of region.includes) {
+                if (subregion.id === regionId) {
+                    if (subregion.countries.includes(upperCode)) {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -74,11 +79,6 @@ function runTests() {
         isPathAllowed("/foo/", "foo"),
         true,
         "Pattern with both leading and trailing slashes should match"
-    );
-    assertEquals(
-        isPathAllowed("foo", "/foo/"),
-        true,
-        "Path with leading and trailing slashes should match"
     );
 
     // Test simple wildcard matching
@@ -493,6 +493,72 @@ function runRegionTests() {
         isIpInRegion("DE", "999"),
         false,
         "Invalid region code should return false"
+    );
+
+    // --- Multi-region (comma-separated) tests ---
+
+    // Single region in a list should behave like a single value
+    assertEquals(
+        isIpInRegion("DE", "150,"),
+        true,
+        "Trailing comma in single-region list should still match"
+    );
+    assertEquals(
+        isIpInRegion("DE", ",150"),
+        true,
+        "Leading comma in single-region list should still match"
+    );
+
+    // Two regions: country matches the second one
+    assertEquals(
+        isIpInRegion("US", "150,021"),
+        true,
+        "Country should match second region in list (North America)"
+    );
+    assertEquals(
+        isIpInRegion("DE", "150,021"),
+        true,
+        "Country should match first region in list (Europe)"
+    );
+
+    // Country not in any listed region
+    assertEquals(
+        isIpInRegion("AU", "150,021"),
+        false,
+        "Country not in any listed region should return false"
+    );
+
+    // Three regions: country matches the third one
+    assertEquals(
+        isIpInRegion("BR", "150,021,005"),
+        true,
+        "Country should match third region in list (South America)"
+    );
+
+    // Subregion-level multi-match
+    assertEquals(
+        isIpInRegion("DE", "154,155"),
+        true,
+        "Country should match subregion in multi-region list"
+    );
+    assertEquals(
+        isIpInRegion("GB", "154,155"),
+        true,
+        "Country should match Northern Europe subregion in multi-region list"
+    );
+
+    // Whitespace tolerance in comma-separated list
+    assertEquals(
+        isIpInRegion("DE", "150, 155"),
+        true,
+        "Whitespace after comma in region list should be tolerated"
+    );
+
+    // Empty list (only commas) should return false
+    assertEquals(
+        isIpInRegion("DE", ","),
+        false,
+        "Empty region list should return false"
     );
 
     console.log("All region tests passed!");

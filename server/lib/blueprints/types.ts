@@ -5,7 +5,11 @@ import { MaintenanceSchema } from "#dynamic/lib/blueprints/MaintenanceSchema";
 import { MtlsSchema } from "#dynamic/lib/blueprints/MtlsSchema";
 import { resourceModeSupportsMtls } from "@server/lib/mtlsModes";
 import { isValidRegionId } from "@server/db/regions";
-import { isValidHttpMethodList } from "@server/lib/validators";
+import {
+    isValidCountryList,
+    isValidHttpMethodList,
+    isValidRegionList
+} from "@server/lib/validators";
 import { routePathSchema, wildcardSubdomainSchema } from "@server/lib/schemas";
 import config from "@server/lib/config";
 import {
@@ -205,15 +209,15 @@ export const RuleSchema = z
                 if (!hasMaxmindCountryDb) {
                     return false;
                 }
-                // Check if it's a valid 2-letter country code or "ALL"
-                return /^[A-Z]{2}$/.test(rule.value) || rule.value === "ALL";
+                // Check if it's a valid comma-separated list of 2-letter country codes and/or "ALL"
+                return isValidCountryList(rule.value);
             }
             return true;
         },
         {
             path: ["value"],
             message:
-                "Country rules require a valid existing server.maxmind_db_path and value must be a 2-letter country code or 'ALL'"
+                "Country rules require a valid existing server.maxmind_db_path and value must be a comma-separated list of 2-letter country codes and/or 'ALL'"
         }
     )
     .refine(
@@ -237,14 +241,14 @@ export const RuleSchema = z
     .refine(
         (rule) => {
             if (rule.match === "region") {
-                return isValidRegionId(rule.value);
+                return isValidRegionList(rule.value);
             }
             return true;
         },
         {
             path: ["value"],
             message:
-                "Value must be a valid UN M.49 region or subregion ID when match is 'region'"
+                "Value must be a comma-separated list of valid UN M.49 region or subregion IDs when match is 'region'"
         }
     )
     .refine(

@@ -116,6 +116,40 @@ export function isValidHttpMethodList(value: string): boolean {
     );
 }
 
+// Validates a comma-separated list of country codes. Each item must be a valid
+// country code from COUNTRIES (e.g. "US", "DE") or "ALL".
+// A single code like "US" is also valid (legacy).
+export function isValidCountryList(value: string): boolean {
+    const codes = value
+        .split(",")
+        .map((c) => c.trim().toUpperCase())
+        .filter(Boolean);
+
+    if (codes.length === 0) {
+        return false;
+    }
+
+    return codes.every(
+        (code) => code === "ALL" || COUNTRIES.some((c) => c.code === code)
+    );
+}
+
+// Validates a comma-separated list of region IDs. Each item must be a valid
+// region ID from REGIONS (e.g. "150", "151").
+// A single ID like "150" is also valid (legacy).
+export function isValidRegionList(value: string): boolean {
+    const ids = value
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
+
+    if (ids.length === 0) {
+        return false;
+    }
+
+    return ids.every((id) => isValidRegionId(id));
+}
+
 export type ResourceRuleMatchType = (typeof RESOURCE_RULE_MATCH_TYPES)[number];
 
 export function getResourceRuleValueValidationError(
@@ -132,12 +166,14 @@ export function getResourceRuleValueValidationError(
                 ? null
                 : "Invalid URL glob pattern provided";
         case "REGION":
-            return isValidRegionId(value) ? null : "Invalid region ID provided";
+            return isValidRegionList(value)
+                ? null
+                : "Invalid region ID list provided";
         case "COUNTRY":
         case "COUNTRY_IS_NOT":
-            return COUNTRIES.some((country) => country.code === value)
+            return isValidCountryList(value)
                 ? null
-                : "Invalid country code provided";
+                : "Invalid country code list provided";
         case "METHOD":
             return isValidHttpMethodList(value)
                 ? null

@@ -2,8 +2,10 @@ import { COUNTRIES } from "@server/db/countries";
 import { isValidRegionId } from "@server/db/regions";
 import {
     isValidCIDR,
+    isValidCountryList,
     isValidHttpMethodList,
     isValidIP,
+    isValidRegionList,
     isValidUrlGlobPattern
 } from "@server/lib/validators";
 import z from "zod";
@@ -77,13 +79,13 @@ export function createPolicyRuleValueSchema(t: TranslateFn, match: string) {
                 message: t("rulesErrorInvalidUrlDescription")
             });
         case "REGION":
-            return required.refine(isValidRegionId, {
+            return required.refine(isValidRegionList, {
                 message: t("rulesErrorInvalidRegionDescription")
             });
         case "COUNTRY":
         case "COUNTRY_IS_NOT":
             return required.refine(
-                (value) => COUNTRIES.some((country) => country.code === value),
+                isValidCountryList,
                 { message: t("rulesErrorInvalidCountryDescription") }
             );
         case "METHOD":
