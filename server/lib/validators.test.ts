@@ -1,7 +1,11 @@
 import {
     getResourceRuleValueValidationError,
+    isValidCountryList,
     isValidDomain,
     isValidUrlGlobPattern,
+    normalizeCountryList,
+    normalizeRegionList,
+    normalizeRuleValue,
     parseHttpMethodList
 } from "./validators";
 import { assertEquals, assertEqualsObj } from "@test/assert";
@@ -332,6 +336,117 @@ function runTests() {
         parseHttpMethodList(" get ,post, "),
         ["GET", "POST"],
         "Method list should be normalized to uppercase without empty entries"
+    );
+
+    // Country list validation. "ALL" is a selector for every country, so it is
+    // only accepted on its own: "ALL,DE,US" matches every address and turns a
+    // COUNTRY_IS_NOT rule into a no-op that blocks nobody.
+    assertEquals(
+        isValidCountryList("DE,US"),
+        true,
+        "Multi-country list should be valid"
+    );
+    assertEquals(
+        isValidCountryList(" de , us "),
+        true,
+        "Country list should tolerate case and whitespace"
+    );
+    assertEquals(
+        isValidCountryList("ALL"),
+        true,
+        "ALL on its own should be valid"
+    );
+    assertEquals(
+        isValidCountryList("ALL,DE,US"),
+        false,
+        "ALL combined with specific countries should be invalid"
+    );
+    assertEquals(
+        isValidCountryList("DE,ALL"),
+        false,
+        "ALL combined in any position should be invalid"
+    );
+    assertEquals(
+        isValidCountryList("DE,XX"),
+        false,
+        "Unknown country code should be invalid"
+    );
+    assertEquals(
+        isValidCountryList(""),
+        false,
+        "Empty country list should be invalid"
+    );
+    assertEquals(
+        getResourceRuleValueValidationError("COUNTRY_IS_NOT", "ALL,DE,US"),
+        "Invalid country code list provided",
+        "The API should reject ALL combined with specific countries"
+    );
+
+    // Canonical country value: uppercase, deduped, in COUNTRIES order, and with
+    // a stray ALL dropped so a value saved by the old picker reads as intended.
+    assertEquals(
+        normalizeCountryList("us, de"),
+        "DE,US",
+        "Country list should normalize to a stable order"
+    );
+    assertEquals(
+        normalizeCountryList("DE,US,DE"),
+        "DE,US",
+        "Duplicate country codes should be removed"
+    );
+    assertEquals(
+        normalizeCountryList("ALL,DE,US"),
+        "DE,US",
+        "A stray ALL should be dropped in favour of the specific codes"
+    );
+    assertEquals(
+        normalizeCountryList("ALL"),
+        "ALL",
+        "ALL on its own should be preserved"
+    );
+
+    assertEquals(
+        normalizeRegionList("155,154"),
+        "154,155",
+        "Region list should normalize to the order REGIONS declares"
+    );
+    assertEquals(
+        normalizeRegionList("150, 002"),
+        "002,150",
+        "Region list should tolerate whitespace and normalize order"
+    );
+
+    // A hand-entered ASN number is stored in the same shape the picker stores,
+    // so the row renders the ASN name instead of "Custom".
+    assertEquals(
+        normalizeRuleValue("ASN", "15169"),
+        "AS15169",
+        "A bare ASN number should gain the AS prefix"
+    );
+    assertEquals(
+        normalizeRuleValue("ASN", " as15169 "),
+        "AS15169",
+        "An ASN with prefix, case and whitespace should canonicalize"
+    );
+    assertEquals(
+        normalizeRuleValue("ASN", "ALL"),
+        "ALL",
+        "The ALL ASN selector should be preserved"
+    );
+    assertEquals(
+        normalizeRuleValue("COUNTRY_IS_NOT", "us, de"),
+        "DE,US",
+        "normalizeRuleValue should route country rules to the country list"
+    );
+    assertEquals(
+        normalizeRuleValue("METHOD", " get ,post "),
+        "GET,POST",
+        "normalizeRuleValue should route method rules to the method list"
+    );
+    assertEquals(
+        normalizeRuleValue("PATH", "/Foo/Bar"),
+        "/Foo/Bar",
+        "Path values should pass through untouched"
     );
 
     console.log("All tests passed!");

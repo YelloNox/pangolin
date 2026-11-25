@@ -9,6 +9,7 @@ import logger from "@server/logger";
 import { fromError } from "zod-validation-error";
 import {
     getResourceRuleValueValidationError,
+    normalizeRuleValue,
     RESOURCE_RULE_MATCH_TYPES
 } from "@server/lib/validators";
 import { OpenAPITags, registry } from "@server/openApi";
@@ -175,13 +176,20 @@ export async function setResourcePolicyRules(
             }
         }
 
+        // Store each value in the canonical form for its match type, so a rule
+        // reads the same however it was created (UI, API, blueprint).
+        const normalizedRules = rules.map((rule) => ({
+            ...rule,
+            value: normalizeRuleValue(rule.match, rule.value)
+        }));
+
         await db.transaction(async (trx) => {
             await trx
                 .update(resourcePolicies)
                 .set({ applyRules })
                 .where(eq(resourcePolicies.resourcePolicyId, resourcePolicyId));
 
-            const incomingRuleIds = rules
+            const incomingRuleIds = normalizedRules
                 .map((r) => r.ruleId)
                 .filter((id): id is number => id !== undefined);
 
@@ -213,7 +221,7 @@ export async function setResourcePolicyRules(
             }
 
             // Update existing rules (those with a ruleId)
-            const existingRules = rules.filter(
+            const existingRules = normalizedRules.filter(
                 (r): r is typeof r & { ruleId: number } =>
                     r.ruleId !== undefined
             );
@@ -239,7 +247,9 @@ export async function setResourcePolicyRules(
             }
 
             // Insert new rules (those without a ruleId)
-            const newRules = rules.filter((r) => r.ruleId === undefined);
+            const newRules = normalizedRules.filter(
+                (r) => r.ruleId === undefined
+            );
             if (newRules.length > 0) {
                 await trx.insert(resourcePolicyRules).values(
                     newRules.map((rule) => ({

@@ -68,7 +68,12 @@ import {
 } from "#dynamic/lib/checkOrgAccessPolicy";
 import { logRequestAudit } from "./logRequestAudit";
 import { logAccessAudit } from "#dynamic/lib/logAccessAudit";
-import { REGIONS } from "@server/db/regions";
+import {
+    isAllCountriesSelector,
+    isCountryListMatch,
+    isIpInRegion,
+    parseCountryCodeList
+} from "@server/lib/resourceRuleMatchers";
 import { localCache } from "#dynamic/lib/cache";
 import { APP_VERSION } from "@server/lib/consts";
 import { isLicensedOrSubscribed } from "#dynamic/lib/isLicencedOrSubscribed";
@@ -1696,19 +1701,17 @@ async function checkRules(
             clientIp &&
             (rule.match === "COUNTRY" || rule.match === "COUNTRY_IS_NOT")
         ) {
-            // COUNTRY containing ALL should not affect local/private/CGNAT addresses.
-            const countryCodes = rule.value
-                .split(",")
-                .map((c) => c.trim().toUpperCase())
-                .filter(Boolean);
+            // A COUNTRY rule set to ALL should not affect local/private/CGNAT
+            // addresses. "ALL" only counts when it is the whole selection, so a
+            // legacy value like "ALL,DE,US" is read as "DE,US" here too.
             if (
-                countryCodes.includes("ALL") &&
+                isAllCountriesSelector(parseCountryCodeList(rule.value)) &&
                 isLocalOrCarrierGradeNatIp(clientIp)
             ) {
                 continue;
             }
 
-            const inCountry = await isIpInGeoIP(ipCC, rule.value);
+            const inCountry = isCountryListMatch(ipCC, rule.value);
             const matched = rule.match === "COUNTRY" ? inCountry : !inCountry;
 
             if (matched) {
@@ -1752,29 +1755,6 @@ function isMethodAllowed(ruleValue: string, method: string): boolean {
 }
 
 export { isPathAllowed };
-
-// rule.value holds a comma-separated list of country codes, e.g. "US,DE".
-// A single code like "US" is also valid (legacy).
-async function isIpInGeoIP(
-    ipCountryCode: string | undefined,
-    checkCountryCodes: string
-): Promise<boolean> {
-    const codes = checkCountryCodes
-        .split(",")
-        .map((c) => c.trim().toUpperCase())
-        .filter(Boolean);
-
-    if (codes.includes("ALL")) {
-        return true;
-    }
-
-    if (!ipCountryCode) {
-        return false;
-    }
-
-    const upper = ipCountryCode.toUpperCase();
-    return codes.includes(upper);
-}
 
 function isLocalOrCarrierGradeNatIp(ip: string): boolean {
     const localAndCgnatCidrs = [
@@ -1824,54 +1804,6 @@ async function isIpInAsn(
     );
 
     return match;
-}
-
-// rule.value holds a comma-separated list of region IDs, e.g. "150,151".
-// A single ID like "150" is also valid (legacy).
-export async function isIpInRegion(
-    ipCountryCode: string | undefined,
-    checkRegionCodes: string
-): Promise<boolean> {
-    if (!ipCountryCode) {
-        return false;
-    }
-
-    const upperCode = ipCountryCode.toUpperCase();
-    const regionIds = checkRegionCodes
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-
-    for (const regionId of regionIds) {
-        for (const region of REGIONS) {
-            // Check if it's a top-level region (continent)
-            if (region.id === regionId) {
-                for (const subregion of region.includes) {
-                    if (subregion.countries.includes(upperCode)) {
-                        logger.debug(
-                            `Country ${upperCode} is in region ${region.id} (${region.name})`
-                        );
-                        return true;
-                    }
-                }
-            }
-
-            // Check subregions
-            for (const subregion of region.includes) {
-                if (subregion.id === regionId) {
-                    if (subregion.countries.includes(upperCode)) {
-                        logger.debug(
-                            `Country ${upperCode} is in region ${subregion.id} (${subregion.name})`
-                        );
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-
-    logger.debug(`Country ${upperCode} is not in any of regions: ${regionIds.join(", ")}`);
-    return false;
 }
 
 async function getAsnFromIp(ip: string): Promise<number | undefined> {

@@ -3901,7 +3901,12 @@
     "redirectPermanentDescription": "Respond with 308 instead of 307. Permanent redirects are cached by browsers.",
     "redirectSslDescription": "Serve this redirect over HTTPS. Turn off to match requests on plain HTTP.",
     "rulesErrorInvalidMethodDescription": "Select at least one HTTP method.",
+    "rulesSelectAsn": "Select ASN",
     "rulesSelectCountries": "Select countries",
     "rulesSelectMethods": "Select methods",
-    "rulesSelectRegions": "Select regions"
+    "rulesSelectRegions": "Select regions",
+    "rulesSearchAsns": "Search ASNs or enter custom...",
+    "rulesNoAsnFound": "No ASN found. Enter a custom ASN below.",
+    "rulesCustomAsnPlaceholder": "Enter custom ASN (e.g., AS15169)",
+    "rulesCustomAsn": "Custom ({asn})"
 }

@@ -1,43 +1,12 @@
 import { assertEquals } from "@test/assert";
-import { REGIONS } from "@server/db/regions";
 import { isPathAllowed } from "@server/lib/pathMatch";
-
-function isIpInRegion(
-    ipCountryCode: string | undefined,
-    checkRegionCodes: string
-): boolean {
-    if (!ipCountryCode) {
-        return false;
-    }
-
-    const upperCode = ipCountryCode.toUpperCase();
-    const regionIds = checkRegionCodes
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-
-    for (const regionId of regionIds) {
-        for (const region of REGIONS) {
-            if (region.id === regionId) {
-                for (const subregion of region.includes) {
-                    if (subregion.countries.includes(upperCode)) {
-                        return true;
-                    }
-                }
-            }
-
-            for (const subregion of region.includes) {
-                if (subregion.id === regionId) {
-                    if (subregion.countries.includes(upperCode)) {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-
-    return false;
-}
+import {
+    isAllCountriesSelector,
+    isCountryListMatch,
+    isIpInRegion,
+    parseCountryCodeList
+} from "@server/lib/resourceRuleMatchers";
+import { translateRulesForNodeVersion } from "@server/lib/nodeRuleTranslation";
 
 function runTests() {
     console.log("Running path matching tests...");
@@ -564,12 +533,226 @@ function runRegionTests() {
     console.log("All region tests passed!");
 }
 
+// Mirrors the COUNTRY / COUNTRY_IS_NOT branch of checkRules in verifySession.ts:
+// a rule matches when the client is in the list (COUNTRY) or outside it
+// (COUNTRY_IS_NOT). Returns true when the rule fires, i.e. when its action
+// applies.
+function countryRuleFires(
+    match: "COUNTRY" | "COUNTRY_IS_NOT",
+    value: string,
+    ipCountryCode: string | undefined
+): boolean {
+    const inCountry = isCountryListMatch(ipCountryCode, value);
+    return match === "COUNTRY" ? inCountry : !inCountry;
+}
+
+function runCountryTests() {
+    console.log("\nRunning country rule tests...");
+
+    // The reported case: Block Access + Country Is Not + "DE,US" must let DE
+    // and US through and block everyone else.
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "DE,US", "DE"),
+        false,
+        "COUNTRY_IS_NOT DE,US must not fire for DE"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "DE,US", "US"),
+        false,
+        "COUNTRY_IS_NOT DE,US must not fire for US"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "DE,US", "FR"),
+        true,
+        "COUNTRY_IS_NOT DE,US must fire for every other country"
+    );
+
+    // COUNTRY is the mirror image.
+    assertEquals(
+        countryRuleFires("COUNTRY", "DE,US", "DE"),
+        true,
+        "COUNTRY DE,US must fire for DE"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY", "DE,US", "FR"),
+        false,
+        "COUNTRY DE,US must not fire for FR"
+    );
+
+    // Whitespace, case and a single legacy value.
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "de, us", "US"),
+        false,
+        "Country list should tolerate spaces and lower case"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY", "DE", "DE"),
+        true,
+        "Single country value should still work"
+    );
+
+    // No resolvable country: not "in" any specific list, so COUNTRY_IS_NOT
+    // fires and blocks, which is the safe direction.
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "DE,US", undefined),
+        true,
+        "Unknown country should be treated as outside a specific list"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY", "DE,US", undefined),
+        false,
+        "Unknown country should not match a specific list"
+    );
+
+    // "ALL" alone matches every address, including an unknown country.
+    assertEquals(
+        isCountryListMatch(undefined, "ALL"),
+        true,
+        "ALL alone should match every address"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "ALL", "FR"),
+        false,
+        "COUNTRY_IS_NOT ALL must not block anyone"
+    );
+
+    // The broken value the old picker produced. "ALL" is only meaningful on
+    // its own, so a stored "ALL,DE,US" is read as "DE,US" and the rule works
+    // again without a migration.
+    assertEquals(
+        isAllCountriesSelector(parseCountryCodeList("ALL,DE,US")),
+        false,
+        "ALL combined with codes is not the all-countries selector"
+    );
+    assertEquals(
+        isAllCountriesSelector(parseCountryCodeList("ALL")),
+        true,
+        "ALL alone is the all-countries selector"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "ALL,DE,US", "FR"),
+        true,
+        "Legacy ALL,DE,US must block countries outside the list"
+    );
+    assertEquals(
+        countryRuleFires("COUNTRY_IS_NOT", "ALL,DE,US", "DE"),
+        false,
+        "Legacy ALL,DE,US must not block DE"
+    );
+
+    console.log("All country rule tests passed!");
+}
+
+function runNodeRuleTranslationTests() {
+    console.log("\nRunning node rule translation tests...");
+
+    const countryRule = { ruleId: 1, match: "COUNTRY", value: "DE,US" };
+    const notCountryRule = {
+        ruleId: 2,
+        match: "COUNTRY_IS_NOT",
+        value: "DE,US"
+    };
+
+    // A modern node gets the rules untouched.
+    const modern = translateRulesForNodeVersion(
+        [countryRule, notCountryRule],
+        "1.12.0"
+    );
+    assertEquals(
+        modern.rules.map((r) => r.match).join(","),
+        "COUNTRY,COUNTRY_IS_NOT",
+        "Modern node should receive the modern match names"
+    );
+    assertEquals(
+        modern.unsupportedMatches.length,
+        0,
+        "Modern node should report nothing unsupported"
+    );
+
+    // A pre-1.1.0 node knows the legacy GEOIP name for a country rule.
+    const legacy = translateRulesForNodeVersion([countryRule], "1.0.0");
+    assertEquals(
+        legacy.rules[0].match,
+        "GEOIP",
+        "Legacy node should receive GEOIP for a COUNTRY rule"
+    );
+
+    // A pre-1.1.0 node has no branch for COUNTRY_IS_NOT and ignores it
+    // silently, so the caller must be told not to send it.
+    const legacyNot = translateRulesForNodeVersion([notCountryRule], "1.0.0");
+    assertEquals(
+        legacyNot.unsupportedMatches.join(","),
+        "COUNTRY_IS_NOT",
+        "Legacy node must report COUNTRY_IS_NOT as unsupported"
+    );
+
+    // An unset version is treated as old, which is the safe direction.
+    const unknown = translateRulesForNodeVersion(
+        [countryRule, notCountryRule],
+        null
+    );
+    assertEquals(
+        unknown.rules[0].match,
+        "GEOIP",
+        "Unset node version should be treated as legacy"
+    );
+    assertEquals(
+        unknown.unsupportedMatches.join(","),
+        "COUNTRY_IS_NOT",
+        "Unset node version must refuse COUNTRY_IS_NOT"
+    );
+
+    // An unparseable version is treated as old too.
+    const garbage = translateRulesForNodeVersion(
+        [countryRule],
+        "not-a-version"
+    );
+    assertEquals(
+        garbage.rules[0].match,
+        "GEOIP",
+        "Unparseable node version should be treated as legacy"
+    );
+
+    // The boundary itself: 1.1.0 is the first version with the matcher.
+    assertEquals(
+        translateRulesForNodeVersion([countryRule], "1.1.0").rules[0].match,
+        "COUNTRY",
+        "1.1.0 should receive the modern COUNTRY name"
+    );
+    assertEquals(
+        translateRulesForNodeVersion([notCountryRule], "1.1.0")
+            .unsupportedMatches.length,
+        0,
+        "1.1.0 should support COUNTRY_IS_NOT"
+    );
+
+    // Other match types pass through a legacy node untouched.
+    const cidr = translateRulesForNodeVersion(
+        [{ ruleId: 3, match: "CIDR", value: "10.0.0.0/8" }],
+        "1.0.0"
+    );
+    assertEquals(
+        cidr.rules[0].match,
+        "CIDR",
+        "CIDR rules should not be renamed"
+    );
+    assertEquals(
+        cidr.unsupportedMatches.length,
+        0,
+        "CIDR is supported by legacy nodes"
+    );
+
+    console.log("All node rule translation tests passed!");
+}
+
 // Run all tests
 try {
     runTests();
     runSpecialCharacterTests();
     runEncodedPatternTests();
     runRegionTests();
+    runCountryTests();
+    runNodeRuleTranslationTests();
     console.log("\n✅ All tests passed!");
 } catch (error) {
     console.error("❌ Test failed:", error);

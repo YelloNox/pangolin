@@ -2,6 +2,13 @@ import z from "zod";
 import ipaddr from "ipaddr.js";
 import { COUNTRIES } from "@server/db/countries";
 import { isValidRegionId } from "@server/db/regions";
+import {
+    ALL_COUNTRY_CODE,
+    orderByReference,
+    parseCountryCodeList,
+    parseRegionIdList,
+    REGION_ID_ORDER
+} from "@server/lib/resourceRuleMatchers";
 
 export function isValidCIDR(cidr: string): boolean {
     return (
@@ -119,35 +126,94 @@ export function isValidHttpMethodList(value: string): boolean {
 // Validates a comma-separated list of country codes. Each item must be a valid
 // country code from COUNTRIES (e.g. "US", "DE") or "ALL".
 // A single code like "US" is also valid (legacy).
+//
+// "ALL" means every country, so it is only accepted on its own. "ALL,DE,US"
+// used to be accepted and made a COUNTRY_IS_NOT rule match nothing, silently
+// blocking nobody, because "ALL" matches every address.
 export function isValidCountryList(value: string): boolean {
-    const codes = value
-        .split(",")
-        .map((c) => c.trim().toUpperCase())
-        .filter(Boolean);
+    const codes = parseCountryCodeList(value);
 
     if (codes.length === 0) {
         return false;
     }
 
-    return codes.every(
-        (code) => code === "ALL" || COUNTRIES.some((c) => c.code === code)
-    );
+    if (codes.includes(ALL_COUNTRY_CODE)) {
+        return codes.length === 1;
+    }
+
+    return codes.every((code) => COUNTRIES.some((c) => c.code === code));
 }
 
 // Validates a comma-separated list of region IDs. Each item must be a valid
 // region ID from REGIONS (e.g. "150", "151").
 // A single ID like "150" is also valid (legacy).
 export function isValidRegionList(value: string): boolean {
-    const ids = value
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
+    const ids = parseRegionIdList(value);
 
     if (ids.length === 0) {
         return false;
     }
 
     return ids.every((id) => isValidRegionId(id));
+}
+
+export function normalizeCountryList(value: string): string {
+    const codes = parseCountryCodeList(value);
+
+    // "ALL" alongside specific codes is a leftover from the single-select
+    // picker; the specific codes are what the author meant.
+    const codesToKeep =
+        codes.length > 1 ? codes.filter((c) => c !== ALL_COUNTRY_CODE) : codes;
+
+    return orderByReference(
+        codesToKeep,
+        COUNTRIES.map((c) => c.code)
+    ).join(",");
+}
+
+export function normalizeRegionList(value: string): string {
+    return orderByReference(parseRegionIdList(value), REGION_ID_ORDER).join(
+        ","
+    );
+}
+
+// ASN is stored as "AS<number>", "ALL" or "AS0". The picker stores the code
+// from MAJOR_ASNS ("AS15169"); a hand-entered number is stored the same way so
+// the two agree and the row renders the ASN name instead of "Custom".
+export function normalizeAsn(value: string): string {
+    const normalized = value.trim().toUpperCase();
+
+    if (normalized === "ALL") {
+        return normalized;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+        return `AS${normalized}`;
+    }
+
+    return normalized;
+}
+
+// Canonical form for a rule value, shared by the API, the resource-policy
+// endpoint and the blueprints so a rule stores the same text however it was
+// created.
+export function normalizeRuleValue(
+    match: ResourceRuleMatchType | string,
+    value: string
+): string {
+    switch (match) {
+        case "COUNTRY":
+        case "COUNTRY_IS_NOT":
+            return normalizeCountryList(value);
+        case "REGION":
+            return normalizeRegionList(value);
+        case "METHOD":
+            return parseHttpMethodList(value).join(",");
+        case "ASN":
+            return normalizeAsn(value);
+        default:
+            return value;
+    }
 }
 
 export type ResourceRuleMatchType = (typeof RESOURCE_RULE_MATCH_TYPES)[number];

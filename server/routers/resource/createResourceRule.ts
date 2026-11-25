@@ -10,7 +10,8 @@ import logger from "@server/logger";
 import { fromError } from "zod-validation-error";
 import {
     RESOURCE_RULE_MATCH_TYPES,
-    getResourceRuleValueValidationError
+    getResourceRuleValueValidationError,
+    normalizeRuleValue
 } from "@server/lib/validators";
 import { OpenAPITags, registry } from "@server/openApi";
 
@@ -159,6 +160,10 @@ export async function createResourceRule(
             );
         }
 
+        // Store the value in the canonical form for its match type, so a rule
+        // reads the same however it was created (UI, API, blueprint).
+        const normalizedValue = normalizeRuleValue(match, value);
+
         // Create the new resource rule
         const isInlinePolicy =
             resource.resourcePolicyId === null &&
@@ -172,7 +177,7 @@ export async function createResourceRule(
                     resourcePolicyId: policyId,
                     action,
                     match,
-                    value,
+                    value: normalizedValue,
                     priority,
                     enabled
                 })
@@ -194,7 +199,7 @@ export async function createResourceRule(
                 resourceId,
                 action,
                 match,
-                value,
+                value: normalizedValue,
                 priority,
                 enabled
             })

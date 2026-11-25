@@ -20,10 +20,8 @@ import { getUniqueResourcePolicyName } from "@server/db/names";
 import { hashPassword } from "@server/auth/password";
 import { idpExistsForOrg } from "@server/lib/idp/idpExistsForOrg";
 import {
-    isValidCIDR,
-    isValidHttpMethodList,
-    isValidIP,
-    isValidUrlGlobPattern,
+    getResourceRuleValueValidationError,
+    normalizeRuleValue,
     ResourceRuleMatchType
 } from "../validators";
 import { isLicensedOrSubscribed } from "#dynamic/lib/isLicencedOrSubscribed";
@@ -56,29 +54,16 @@ export async function updateResourcePolicies(
             );
         }
 
-        // Validate rules
+        // Validate rules against the same rules the API applies, so a
+        // blueprint cannot persist a value the API would reject.
         for (const rule of policyData.rules) {
-            if (rule.match === "cidr" && !isValidCIDR(rule.value)) {
+            const error = getResourceRuleValueValidationError(
+                rule.match.toUpperCase() as ResourceRuleMatchType,
+                rule.value
+            );
+            if (error) {
                 throw new Error(
-                    `Invalid CIDR provided in resource policy '${policyNiceId}': ${rule.value}`
-                );
-            } else if (rule.match === "ip" && !isValidIP(rule.value)) {
-                throw new Error(
-                    `Invalid IP provided in resource policy '${policyNiceId}': ${rule.value}`
-                );
-            } else if (
-                rule.match === "path" &&
-                !isValidUrlGlobPattern(rule.value)
-            ) {
-                throw new Error(
-                    `Invalid URL glob pattern provided in resource policy '${policyNiceId}': ${rule.value}`
-                );
-            } else if (
-                rule.match === "method" &&
-                !isValidHttpMethodList(rule.value)
-            ) {
-                throw new Error(
-                    `Invalid HTTP method provided in resource policy '${policyNiceId}': ${rule.value}`
+                    `Invalid rule in resource policy '${policyNiceId}': ${error}`
                 );
             }
         }
@@ -343,7 +328,10 @@ export async function updateResourcePolicies(
                         resourcePolicyId,
                         action: getRuleAction(rule.action),
                         match: getRuleMatch(rule.match),
-                        value: rule.value,
+                        value: normalizeRuleValue(
+                            getRuleMatch(rule.match),
+                            rule.value
+                        ),
                         priority: rule.priority ?? index + 1,
                         enabled: rule.enabled ?? true
                     }))
@@ -632,13 +620,16 @@ async function syncPolicyRules(
         const intendedPriority = rule.priority ?? index + 1;
         const existingRule = existingRules[index];
 
+        const match = getRuleMatch(rule.match);
+        const value = normalizeRuleValue(match, rule.value);
+
         if (existingRule) {
             await trx
                 .update(resourcePolicyRules)
                 .set({
                     action: getRuleAction(rule.action),
-                    match: getRuleMatch(rule.match),
-                    value: rule.value,
+                    match: match,
+                    value: value,
                     priority: intendedPriority,
                     enabled: rule.enabled ?? true
                 })
@@ -647,8 +638,8 @@ async function syncPolicyRules(
             await trx.insert(resourcePolicyRules).values({
                 resourcePolicyId: policyId,
                 action: getRuleAction(rule.action),
-                match: getRuleMatch(rule.match),
-                value: rule.value,
+                match: match,
+                value: value,
                 priority: intendedPriority,
                 enabled: rule.enabled ?? true
             });

@@ -11,6 +11,7 @@ import { fromError } from "zod-validation-error";
 import {
     RESOURCE_RULE_MATCH_TYPES,
     getResourceRuleValueValidationError,
+    normalizeRuleValue,
     ResourceRuleMatchType
 } from "@server/lib/validators";
 import { OpenAPITags, registry } from "@server/openApi";
@@ -259,11 +260,21 @@ export async function updateResourceRule(
             }
         }
 
+        // Store the value in the canonical form for its match type, so a rule
+        // reads the same however it was created (UI, API, blueprint).
+        const dataToWrite =
+            value === undefined
+                ? updateData
+                : {
+                      ...updateData,
+                      value: normalizeRuleValue(match, value)
+                  };
+
         // Update the rule
         const [updatedRule] = isInlinePolicy
             ? await db
                   .update(resourcePolicyRules)
-                  .set(updateData)
+                  .set(dataToWrite)
                   .where(
                       and(
                           eq(resourcePolicyRules.ruleId, ruleId),
@@ -276,7 +287,7 @@ export async function updateResourceRule(
                   .returning()
             : await db
                   .update(resourceRules)
-                  .set(updateData)
+                  .set(dataToWrite)
                   .where(
                       and(
                           eq(resourceRules.ruleId, ruleId),

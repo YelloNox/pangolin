@@ -38,6 +38,10 @@ import { cn } from "@app/lib/cn";
 import { MAJOR_ASNS } from "@server/db/asns";
 import { COUNTRIES } from "@server/db/countries";
 import { REGIONS, getRegionNameById } from "@server/db/regions";
+import {
+    ALL_COUNTRY_CODE,
+    orderRegionIds
+} from "@server/lib/resourceRuleMatchers";
 import { HTTP_METHODS, parseHttpMethodList } from "@server/lib/validators";
 import {
     ColumnDef,
@@ -246,14 +250,23 @@ function RuleCountrySelect({
         ...COUNTRIES.map((c) => c.code),
         ...selected.filter((code) => !COUNTRIES.some((c) => c.code === code))
     ];
-
     function toggle(code: string) {
-        const next = selected.includes(code)
-            ? selected.filter((c) => c !== code)
-            : [...selected, code];
+        // "ALL" means every country, so it cannot live alongside specific
+        // codes: a value like "ALL,DE,US" matches every address and turns a
+        // "Country Is Not" rule into a no-op that blocks nobody. Picking ALL
+        // collapses the list; picking a country drops ALL, which also cleans
+        // up a value the old picker saved.
+        let next: string[];
+        if (code === ALL_COUNTRY_CODE) {
+            next = selected.includes(code) ? [] : [ALL_COUNTRY_CODE];
+        } else {
+            const withoutAll = selected.filter((c) => c !== ALL_COUNTRY_CODE);
+            next = withoutAll.includes(code)
+                ? withoutAll.filter((c) => c !== code)
+                : [...withoutAll, code];
+        }
         onChange(options.filter((c) => next.includes(c)).join(","));
     }
-
     return (
         <Popover>
             <PopoverTrigger asChild>
@@ -290,7 +303,9 @@ function RuleCountrySelect({
                                     <span>
                                         {country.code === "ALL"
                                             ? "\ud83c\udf0d"
-                                            : countryCodeToFlagEmoji(country.code)}
+                                            : countryCodeToFlagEmoji(
+                                                  country.code
+                                              )}
                                     </span>
                                     {country.name} ({country.code})
                                 </CommandItem>
@@ -324,7 +339,8 @@ function RuleRegionSelect({
         const next = selected.includes(id)
             ? selected.filter((c) => c !== id)
             : [...selected, id];
-        onChange(next.join(","));
+        // keep a stable order so the stored value does not churn on every edit
+        onChange(orderRegionIds(next).join(","));
     }
 
     return (
@@ -356,10 +372,7 @@ function RuleRegionSelect({
                             >
                                 <CommandItem
                                     value={continent.id}
-                                    keywords={[
-                                        t(continent.name),
-                                        continent.id
-                                    ]}
+                                    keywords={[t(continent.name), continent.id]}
                                     onSelect={() => toggle(continent.id)}
                                 >
                                     <Check
@@ -780,145 +793,160 @@ export function PolicyAccessRulesTable({
                 cell: ({ row }) => {
                     return row.original.match === "COUNTRY" ||
                         row.original.match === "COUNTRY_IS_NOT" ? (
-                            <RuleCountrySelect
-                                value={row.original.value}
-                                disabled={readonly || isRuleLocked(row.original)}
-                                placeholder={t("rulesSelectCountries")}
-                                onChange={(value) =>
-                                    updateRule(row.original.ruleId, { value })
-                                }
-                            />
-                        ) : row.original.match === "ASN" ? (
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        role="combobox"
-                                        disabled={
-                                            readonly || isRuleLocked(row.original)
-                                        }
-                                        className="w-full min-w-0 justify-between"
-                                    >
-                                        {row.original.value
-                                            ? (() => {
-                                                  const found = MAJOR_ASNS.find(
-                                                      (asn) =>
-                                                          asn.code ===
-                                                          row.original.value
-                                                  );
-                                                  return found
-                                                      ? `${found.name} (${row.original.value})`
-                                                      : `Custom (${row.original.value})`;
-                                              })()
-                                            : "Select ASN"}
-                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="min-w-50 p-0">
-                                    <Command>
-                                        <CommandInput placeholder="Search ASNs or enter custom..." />
-                                        <ResettingCommandList>
-                                            <CommandEmpty>
-                                                No ASN found. Enter a custom ASN
-                                                below.
-                                            </CommandEmpty>
-                                            <CommandGroup>
-                                                {MAJOR_ASNS.map((asn) => (
-                                                    <CommandItem
-                                                        key={asn.code}
-                                                        value={
-                                                            asn.name +
-                                                            " " +
-                                                            asn.code
-                                                        }
-                                                        onSelect={() =>
-                                                            updateRule(
-                                                                row.original.ruleId,
-                                                                { value: asn.code }
-                                                            )
-                                                        }
-                                                    >
-                                                        <Check
-                                                            className={`mr-2 h-4 w-4 ${row.original.value === asn.code ? "opacity-100" : "opacity-0"}`}
-                                                        />
-                                                        {asn.name} ({asn.code})
-                                                    </CommandItem>
-                                                ))}
-                                            </CommandGroup>
-                                        </ResettingCommandList>
-                                    </Command>
-                                    <div className="border-t p-2">
-                                        <Input
-                                            placeholder="Enter custom ASN (e.g., AS15169)"
-                                            defaultValue={
-                                                !MAJOR_ASNS.find(
-                                                    (asn) =>
-                                                        asn.code ===
-                                                        row.original.value
-                                                )
-                                                    ? row.original.value
-                                                    : ""
-                                            }
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter") {
-                                                    const value =
-                                                        e.currentTarget.value
-                                                            .toUpperCase()
-                                                            .replace(/^AS/, "");
-                                                    if (/^\d+$/.test(value)) {
+                        <RuleCountrySelect
+                            value={row.original.value}
+                            disabled={readonly || isRuleLocked(row.original)}
+                            placeholder={t("rulesSelectCountries")}
+                            onChange={(value) =>
+                                updateRule(row.original.ruleId, { value })
+                            }
+                        />
+                    ) : row.original.match === "ASN" ? (
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    disabled={
+                                        readonly || isRuleLocked(row.original)
+                                    }
+                                    className="w-full min-w-0 justify-between"
+                                >
+                                    {row.original.value
+                                        ? (() => {
+                                              const found = MAJOR_ASNS.find(
+                                                  (asn) =>
+                                                      asn.code ===
+                                                      row.original.value
+                                              );
+                                              return found
+                                                  ? `${found.name} (${row.original.value})`
+                                                  : t("rulesCustomAsn", {
+                                                        asn: row.original.value
+                                                    });
+                                          })()
+                                        : t("rulesSelectAsn")}
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="min-w-50 p-0">
+                                <Command>
+                                    <CommandInput
+                                        placeholder={t("rulesSearchAsns")}
+                                    />
+                                    <ResettingCommandList>
+                                        <CommandEmpty>
+                                            {t("rulesNoAsnFound")}
+                                        </CommandEmpty>
+                                        <CommandGroup>
+                                            {MAJOR_ASNS.map((asn) => (
+                                                <CommandItem
+                                                    key={asn.code}
+                                                    value={
+                                                        asn.name +
+                                                        " " +
+                                                        asn.code
+                                                    }
+                                                    onSelect={() =>
                                                         updateRule(
                                                             row.original.ruleId,
-                                                            { value }
-                                                        );
+                                                            { value: asn.code }
+                                                        )
                                                     }
+                                                >
+                                                    <Check
+                                                        className={`mr-2 h-4 w-4 ${row.original.value === asn.code ? "opacity-100" : "opacity-0"}`}
+                                                    />
+                                                    {asn.name} ({asn.code})
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </ResettingCommandList>
+                                </Command>
+                                <div className="border-t p-2">
+                                    <Input
+                                        placeholder={t(
+                                            "rulesCustomAsnPlaceholder"
+                                        )}
+                                        defaultValue={
+                                            !MAJOR_ASNS.find(
+                                                (asn) =>
+                                                    asn.code ===
+                                                    row.original.value
+                                            )
+                                                ? row.original.value
+                                                : ""
+                                        }
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                // Store the same shape the
+                                                // picker stores ("AS15169") so
+                                                // a hand-entered ASN renders as
+                                                // the ASN name, not "Custom".
+                                                const raw =
+                                                    e.currentTarget.value
+                                                        .trim()
+                                                        .toUpperCase();
+                                                if (/^AS?\d+$/.test(raw)) {
+                                                    updateRule(
+                                                        row.original.ruleId,
+                                                        {
+                                                            value: raw.startsWith(
+                                                                "AS"
+                                                            )
+                                                                ? raw
+                                                                : `AS${raw}`
+                                                        }
+                                                    );
                                                 }
-                                            }}
-                                        />
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                        ) : row.original.match === "REGION" ? (
-                            <RuleRegionSelect
-                                value={row.original.value}
-                                disabled={readonly || isRuleLocked(row.original)}
-                                placeholder={t("rulesSelectRegions")}
-                                onChange={(value) =>
-                                    updateRule(row.original.ruleId, { value })
-                                }
-                            />
-                        ) : row.original.match === "METHOD" ? (
-                            <RuleMethodSelect
-                                value={row.original.value}
-                                disabled={readonly || isRuleLocked(row.original)}
-                                placeholder={t("rulesSelectMethods")}
-                                onChange={(value) =>
-                                    updateRule(row.original.ruleId, { value })
-                                }
-                            />
-                        ) : (
-                            <Input
-                                defaultValue={row.original.value}
-                                className="w-full min-w-0"
-                                disabled={readonly || isRuleLocked(row.original)}
-                                onBlur={(e) => {
-                                    const validated = validatePolicyRuleValue(
-                                        t,
-                                        row.original.match,
-                                        e.target.value
-                                    );
-                                    if (!validated.success) {
-                                        toast({
-                                            variant: "destructive",
-                                            ...validated.toast
-                                        });
-                                        return;
-                                    }
-                                    updateRule(row.original.ruleId, {
-                                        value: validated.data
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </PopoverContent>
+                        </Popover>
+                    ) : row.original.match === "REGION" ? (
+                        <RuleRegionSelect
+                            value={row.original.value}
+                            disabled={readonly || isRuleLocked(row.original)}
+                            placeholder={t("rulesSelectRegions")}
+                            onChange={(value) =>
+                                updateRule(row.original.ruleId, { value })
+                            }
+                        />
+                    ) : row.original.match === "METHOD" ? (
+                        <RuleMethodSelect
+                            value={row.original.value}
+                            disabled={readonly || isRuleLocked(row.original)}
+                            placeholder={t("rulesSelectMethods")}
+                            onChange={(value) =>
+                                updateRule(row.original.ruleId, { value })
+                            }
+                        />
+                    ) : (
+                        <Input
+                            defaultValue={row.original.value}
+                            className="w-full min-w-0"
+                            disabled={readonly || isRuleLocked(row.original)}
+                            onBlur={(e) => {
+                                const validated = validatePolicyRuleValue(
+                                    t,
+                                    row.original.match,
+                                    e.target.value
+                                );
+                                if (!validated.success) {
+                                    toast({
+                                        variant: "destructive",
+                                        ...validated.toast
                                     });
-                                }}
-                            />
-                        );
+                                    return;
+                                }
+                                updateRule(row.original.ruleId, {
+                                    value: validated.data
+                                });
+                            }}
+                        />
+                    );
                 }
             },
             {
@@ -1002,9 +1030,7 @@ export function PolicyAccessRulesTable({
                                 return (
                                     <TableHead
                                         key={header.id}
-                                        className={getColumnClassName(
-                                            columnId
-                                        )}
+                                        className={getColumnClassName(columnId)}
                                     >
                                         {flexRender(
                                             header.column.columnDef.header,
@@ -1030,7 +1056,9 @@ export function PolicyAccessRulesTable({
                                 <TableRow
                                     key={row.id}
                                     draggable={isRuleDraggable(rule)}
-                                    onDragStart={(e) => handleDragStart(rule.ruleId, e)}
+                                    onDragStart={(e) =>
+                                        handleDragStart(rule.ruleId, e)
+                                    }
                                     onDragEnd={handleDragEnd}
                                     onDragOver={(e) => {
                                         e.preventDefault();
@@ -1040,8 +1068,14 @@ export function PolicyAccessRulesTable({
                                         e.preventDefault();
                                         const fromRuleId = draggedRuleId;
                                         setDragOverRuleId(null);
-                                        if (fromRuleId !== null && fromRuleId !== rule.ruleId) {
-                                            handleReorder(fromRuleId, rule.ruleId);
+                                        if (
+                                            fromRuleId !== null &&
+                                            fromRuleId !== rule.ruleId
+                                        ) {
+                                            handleReorder(
+                                                fromRuleId,
+                                                rule.ruleId
+                                            );
                                         }
                                     }}
                                     className={cn(

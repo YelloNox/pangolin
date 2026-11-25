@@ -39,7 +39,6 @@ import {
     type ResourceRule
 } from "@server/db";
 import { getUniqueResourcePolicyName } from "@server/db/names";
-import { isValidRegionId } from "@server/db/regions";
 import { fireHealthCheckUnknownAlert } from "@server/lib/alerts";
 import serverConfig from "@server/lib/config";
 import { encrypt } from "@server/lib/crypto";
@@ -50,11 +49,9 @@ import { and, asc, eq, isNotNull, ne } from "drizzle-orm";
 import { checkWildcardDomainConflict } from "@server/lib/domainUtils";
 import { tierMatrix } from "../billing/tierMatrix";
 import {
-    isValidCIDR,
-    isValidHttpMethodList,
-    isValidIP,
-    isValidUrlGlobPattern,
-    parseHttpMethodList
+    getResourceRuleValueValidationError,
+    normalizeRuleValue,
+    type ResourceRuleMatchType
 } from "../validators";
 import {
     Config,
@@ -1572,39 +1569,23 @@ function getRuleAction(input: string) {
     return action;
 }
 
+// Blueprint rule values are stored in the same canonical form the API and the
+// resource-policy endpoint use, so a rule reads identically however it was
+// created. `match` is the upper-case DB value.
 function getRuleValue(match: string, value: string) {
-    // if the match is a country, uppercase the value
-    if (match === "COUNTRY" || match === "COUNTRY_IS_NOT") {
-        return value.toUpperCase();
-    }
-    // normalize the method list so it is stored as "POST,PUT"
-    if (match === "METHOD") {
-        return parseHttpMethodList(value).join(",");
-    }
-    return value;
+    return normalizeRuleValue(match, value);
 }
 
+// Validates against the same rules the API applies, so a blueprint cannot
+// persist a value the API would reject.
 function validateRule(rule: any) {
-    if (rule.match === "cidr") {
-        if (!isValidCIDR(rule.value)) {
-            throw new Error(`Invalid CIDR provided: ${rule.value}`);
-        }
-    } else if (rule.match === "ip") {
-        if (!isValidIP(rule.value)) {
-            throw new Error(`Invalid IP provided: ${rule.value}`);
-        }
-    } else if (rule.match === "path") {
-        if (!isValidUrlGlobPattern(rule.value)) {
-            throw new Error(`Invalid URL glob pattern: ${rule.value}`);
-        }
-    } else if (rule.match === "region") {
-        if (!isValidRegionId(rule.value)) {
-            throw new Error(`Invalid region ID provided: ${rule.value}`);
-        }
-    } else if (rule.match === "method") {
-        if (!isValidHttpMethodList(rule.value)) {
-            throw new Error(`Invalid HTTP method provided: ${rule.value}`);
-        }
+    const match = String(rule.match).toUpperCase();
+    const error = getResourceRuleValueValidationError(
+        match as ResourceRuleMatchType,
+        rule.value
+    );
+    if (error) {
+        throw new Error(`Invalid ${rule.match} rule value: ${error}`);
     }
 }
 
@@ -1977,8 +1958,7 @@ async function syncInlinePolicyRules(
                     .set({
                         action: getRuleAction(rule.action) as
                             "ACCEPT" | "DROP" | "PASS",
-                        match: rule.match.toUpperCase() as
-                            "CIDR" | "IP" | "PATH",
+                        match: rule.match.toUpperCase() as ResourceRuleMatchType,
                         value: getRuleValue(
                             rule.match.toUpperCase(),
                             rule.value
@@ -1993,7 +1973,7 @@ async function syncInlinePolicyRules(
                 resourcePolicyId: policyId,
                 action: getRuleAction(rule.action) as
                     "ACCEPT" | "DROP" | "PASS",
-                match: rule.match.toUpperCase() as "CIDR" | "IP" | "PATH",
+                match: rule.match.toUpperCase() as ResourceRuleMatchType,
                 value: getRuleValue(rule.match.toUpperCase(), rule.value),
                 priority: intendedPriority
             });

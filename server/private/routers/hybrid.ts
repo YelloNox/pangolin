@@ -95,7 +95,7 @@ import { generateSessionToken } from "@server/auth/sessions/app";
 import { revalidateIdpSession } from "#private/auth/sessions/idpRevalidation";
 import { logAccessAudit } from "#private/lib/logAccessAudit";
 import { getUserOrgRoles } from "@server/lib/userOrgRoles";
-import semver from "semver";
+import { translateRulesForNodeVersion } from "@server/lib/nodeRuleTranslation";
 import { maxmindAsnLookup } from "@server/db/maxmindAsn";
 import { checkOrgAccessPolicy } from "@server/lib/checkOrgAccessPolicy";
 import { sanitizeString } from "@server/lib/sanitize";
@@ -1876,27 +1876,42 @@ hybridRouter.get(
                 ...offsetPolicyRules
             ] as (typeof resourceRules.$inferSelect)[];
 
-            // backward compatibility: COUNTRY -> GEOIP
-            // TODO: remove this after a few versions once all exit nodes are updated
-            if (
-                (remoteExitNode.secondaryVersion &&
-                    semver.lt(remoteExitNode.secondaryVersion, "1.1.0")) ||
-                !remoteExitNode.secondaryVersion
-            ) {
-                for (const rule of rules) {
-                    if (rule.match == "COUNTRY") {
-                        // @ts-expect-error this is for backward compatibility
-                        rule.match = "GEOIP";
-                    }
-                }
+            // Older exit nodes predate the rule matcher: rename COUNTRY back to
+            // the legacy GEOIP name, and refuse to send match types the node has
+            // no branch for. Sending one would make the node ignore the rule
+            // silently, so a DROP rule would open access instead of blocking it.
+            const { rules: nodeRules, unsupportedMatches } =
+                translateRulesForNodeVersion(
+                    rules,
+                    remoteExitNode.secondaryVersion
+                );
+
+            if (unsupportedMatches.length > 0) {
+                logger.warn(
+                    `Exit node ${remoteExitNode.exitNodeId} (version ${
+                        remoteExitNode.secondaryVersion || "unknown"
+                    }) cannot evaluate rule match types ${unsupportedMatches.join(
+                        ", "
+                    )} for resource ID ${resourceId}; refusing to send rules`
+                );
+                return next(
+                    createHttpError(
+                        HttpCode.BAD_REQUEST,
+                        `This resource has rules (${unsupportedMatches.join(
+                            ", "
+                        )}) that exit node ${
+                            remoteExitNode.exitNodeId
+                        } cannot enforce. Update the exit node, then retry.`
+                    )
+                );
             }
 
             logger.debug(
-                `Retrieved ${rules.length} rules for resource ID ${resourceId}: ${JSON.stringify(rules)}`
+                `Retrieved ${nodeRules.length} rules for resource ID ${resourceId}: ${JSON.stringify(nodeRules)}`
             );
 
             return response<(typeof resourceRules.$inferSelect)[]>(res, {
-                data: rules,
+                data: nodeRules,
                 success: true,
                 error: false,
                 message: "Resource rules retrieved successfully",

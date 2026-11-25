@@ -38,6 +38,7 @@ import {
 import response from "@server/lib/response";
 import {
     getResourceRuleValueValidationError,
+    normalizeRuleValue,
     RESOURCE_RULE_MATCH_TYPES
 } from "@server/lib/validators";
 import logger from "@server/logger";
@@ -430,10 +431,14 @@ export async function createResourcePolicy(
             }
 
             if (rules.length > 0) {
+                // Store each value in the canonical form for its match type, so
+                // a rule reads the same however it was created (UI, API,
+                // blueprint).
                 await trx.insert(resourcePolicyRules).values(
                     rules.map((rule) => ({
                         resourcePolicyId: newPolicy.resourcePolicyId,
-                        ...rule
+                        ...rule,
+                        value: normalizeRuleValue(rule.match, rule.value)
                     }))
                 );
             }
