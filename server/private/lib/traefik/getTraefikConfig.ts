@@ -37,6 +37,7 @@ import {
     getValidCertificatesForDomains
 } from "@server/lib/certificates";
 import config from "@server/lib/config";
+import { buildPHostHeaders } from "@server/lib/browserGatewayTrust";
 import {
     AI_GATEWAY_CLIENT_IP_MIDDLEWARE_NAME,
     AI_GATEWAY_TRUST_MIDDLEWARE_RESOURCE,
@@ -91,9 +92,11 @@ import {
     isNotNull,
     isNull,
     not,
+    notExists,
     or,
     sql
 } from "drizzle-orm";
+import { localSiteTargetError } from "@server/lib/localSiteTargets";
 
 const redirectHttpsMiddlewareName = "redirect-to-https";
 const redirectToRootMiddlewareName = "redirect-to-root";
@@ -211,6 +214,30 @@ export async function getTraefikConfig(
                     )
                 ),
                 inArray(sites.type, siteTypes),
+                // A remote exit node only serves sites of the orgs it is
+                // linked to. Nodes with no org links keep the old behaviour
+                // so existing sites on them keep routing.
+                exitNode?.type === "remoteExitNode"
+                    ? or(
+                          inArray(
+                              sites.orgId,
+                              db
+                                  .select({ orgId: exitNodeOrgs.orgId })
+                                  .from(exitNodeOrgs)
+                                  .where(
+                                      eq(exitNodeOrgs.exitNodeId, exitNodeId)
+                                  )
+                          ),
+                          notExists(
+                              db
+                                  .select({ orgId: exitNodeOrgs.orgId })
+                                  .from(exitNodeOrgs)
+                                  .where(
+                                      eq(exitNodeOrgs.exitNodeId, exitNodeId)
+                                  )
+                          )
+                      )
+                    : undefined,
                 allowRawResources
                     ? inArray(resources.mode, [
                           "http",
@@ -308,6 +335,24 @@ export async function getTraefikConfig(
                 maintenanceMessage: row.maintenanceMessage,
                 maintenanceEstimatedTime: row.maintenanceEstimatedTime
             });
+        }
+
+        // Existing local-site targets that point at Pangolin itself are not
+        // served, even if they were created before validation existed. A
+        // remote exit node's config is dialled by that node, so it is left
+        // alone.
+        if (
+            row.siteType === "local" &&
+            exitNode?.type !== "remoteExitNode" &&
+            localSiteTargetError(
+                row.ip ?? "",
+                config.getRawConfig().server.internal_hostname
+            )
+        ) {
+            logger.debug(
+                `Skipping local site target ${row.targetId} on resource ${row.resourceId}: points at a reserved address`
+            );
+            continue;
         }
 
         // Add target with its associated site data
@@ -827,7 +872,10 @@ export async function getTraefikConfig(
                     headers: {
                         customRequestHeaders: {
                             Host: "app.pangolin.net", // if we are sending to the cloud the host needs to be this but we will pull the p-host to find the resource
-                            "p-host": fullDomain
+                            ...buildPHostHeaders(
+                                config.getRawConfig().server.secret,
+                                fullDomain
+                            )
                         }
                     }
                 };
