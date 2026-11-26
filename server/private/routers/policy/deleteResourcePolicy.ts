@@ -18,6 +18,7 @@ import {
     resources
 } from "@server/db";
 import response from "@server/lib/response";
+import { isRuleStackTableAvailable } from "@server/lib/ruleStackAvailability";
 import logger from "@server/logger";
 import { OpenAPITags, registry } from "@server/openApi";
 import HttpCode from "@server/types/HttpCode";
@@ -83,15 +84,22 @@ export async function deleteResourcePolicy(
         );
 
         // A rules-only policy is attached through the stack table instead of
-        // resources.resourcePolicyId, so it needs its own usage check.
-        const totalStackedResources = await db.$count(
-            db
-                .select()
-                .from(resourceRulePolicies)
-                .where(
-                    eq(resourceRulePolicies.resourcePolicyId, resourcePolicyId)
-                )
-        );
+        // resources.resourcePolicyId, so it needs its own usage check. When the
+        // table hasn't been created yet (database not migrated), there can be
+        // no stacks, so skip the check.
+        const totalStackedResources = isRuleStackTableAvailable()
+            ? await db.$count(
+                  db
+                      .select()
+                      .from(resourceRulePolicies)
+                      .where(
+                          eq(
+                              resourceRulePolicies.resourcePolicyId,
+                              resourcePolicyId
+                          )
+                      )
+              )
+            : 0;
 
         if (totalAffectedResources > 0 || totalStackedResources > 0) {
             return next(

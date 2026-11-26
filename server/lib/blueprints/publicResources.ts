@@ -48,6 +48,7 @@ import { defaultRoleAllowedActions } from "@server/routers/role/createRole";
 import { pickPort } from "@server/routers/target/helpers";
 import { and, asc, eq, isNotNull, ne } from "drizzle-orm";
 import { checkWildcardDomainConflict } from "@server/lib/domainUtils";
+import { isRuleStackTableAvailable } from "@server/lib/ruleStackAvailability";
 import { tierMatrix } from "../billing/tierMatrix";
 import {
     getResourceRuleValueValidationError,
@@ -1582,6 +1583,17 @@ async function syncResourceRulePolicies(
     rulePolicies: StackedRulePolicy[],
     trx: Transaction
 ) {
+    // The stack table is created by a migration. Blueprints without stacked
+    // policies must keep applying on databases that haven't been upgraded, so
+    // only touch the table when there is something to write.
+    if (rulePolicies.length === 0) return;
+
+    if (!isRuleStackTableAvailable()) {
+        throw new Error(
+            "Cannot apply stacked access-rules-only policies: the database has not been migrated yet"
+        );
+    }
+
     await trx
         .delete(resourceRulePolicies)
         .where(eq(resourceRulePolicies.resourceId, resourceId));

@@ -98,7 +98,7 @@ import {
     queryOptions
 } from "@tanstack/react-query";
 import { isAxiosError, type AxiosResponse } from "axios";
-import z, { meta } from "zod";
+import z from "zod";
 import { remote } from "./api";
 import { durationToMs } from "./durationToMs";
 

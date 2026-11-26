@@ -37,6 +37,10 @@ import {
     listPublicResourceAiProviders,
     listSiteResourceAiProviders
 } from "@server/lib/aiInferenceResource";
+import {
+    handleRuleStackReadError,
+    isRuleStackTableAvailable
+} from "@server/lib/ruleStackAvailability";
 
 const HTTP_LIKE_PUBLIC_MODES = ["http", "ssh", "rdp", "vnc", "inference"];
 
@@ -523,23 +527,37 @@ export async function buildPublicResourceBlueprintConfig(
 
     // Stacked access-rules-only policies. Like shared policies, these are
     // referenced by niceId and are not bundled into the resource blueprint.
-    const stackedPolicyRows = await db
-        .select({
-            niceId: resourcePolicies.niceId,
-            position: resourceRulePolicies.position,
-            sortOrder: resourceRulePolicies.sortOrder,
-            enabled: resourceRulePolicies.enabled
-        })
-        .from(resourceRulePolicies)
-        .innerJoin(
-            resourcePolicies,
-            eq(
-                resourceRulePolicies.resourcePolicyId,
-                resourcePolicies.resourcePolicyId
-            )
-        )
-        .where(eq(resourceRulePolicies.resourceId, resourceId))
-        .orderBy(asc(resourceRulePolicies.sortOrder));
+    // The table is created by a migration, so skip the read (and export
+    // normally) when the database hasn't been upgraded yet.
+    let stackedPolicyRows: Array<{
+        niceId: string;
+        position: "before" | "after";
+        sortOrder: number;
+        enabled: boolean;
+    }> = [];
+    if (isRuleStackTableAvailable()) {
+        try {
+            stackedPolicyRows = await db
+                .select({
+                    niceId: resourcePolicies.niceId,
+                    position: resourceRulePolicies.position,
+                    sortOrder: resourceRulePolicies.sortOrder,
+                    enabled: resourceRulePolicies.enabled
+                })
+                .from(resourceRulePolicies)
+                .innerJoin(
+                    resourcePolicies,
+                    eq(
+                        resourceRulePolicies.resourcePolicyId,
+                        resourcePolicies.resourcePolicyId
+                    )
+                )
+                .where(eq(resourceRulePolicies.resourceId, resourceId))
+                .orderBy(asc(resourceRulePolicies.sortOrder));
+        } catch (e) {
+            handleRuleStackReadError(e);
+        }
+    }
 
     if (stackedPolicyRows.length > 0) {
         resourceConfig["rule-policies"] = stackedPolicyRows.map((row) => ({

@@ -44,6 +44,10 @@ import { alias } from "@server/db";
 import { and, desc, eq, inArray, isNull, not, or, sql } from "drizzle-orm";
 import logger from "@server/logger";
 import { mergeResourceRules, StackedRule } from "@server/lib/resourceRuleMerge";
+import {
+    handleRuleStackReadError,
+    isRuleStackTableAvailable
+} from "@server/lib/ruleStackAvailability";
 import { pickResourceForHost } from "@server/lib/traefik/rule";
 
 export type ResourceWithAuth = {
@@ -500,37 +504,62 @@ export async function getUserResourceAccess(
  * Get the enabled stacked access-rules-only policies for a resource, split by
  * position. Each rule carries the stack's sortOrder so the merge can order
  * multiple stacks within a position group.
+ *
+ * Degrades to "no stacks" when the stack table has not been created yet, so
+ * rule evaluation keeps working exactly as it did before on databases that
+ * haven't run the upgrade.
  */
 export async function getResourceRuleStacks(resourceId: number): Promise<{
     before: StackedRule<ResourceRule>[];
     after: StackedRule<ResourceRule>[];
 }> {
-    const rows = await db
-        .select({
-            ruleId: resourcePolicyRules.ruleId,
-            resourceId: sql<number>`${resourceId}`,
-            enabled: resourcePolicyRules.enabled,
-            priority: resourcePolicyRules.priority,
-            action: resourcePolicyRules.action,
-            match: resourcePolicyRules.match,
-            value: resourcePolicyRules.value,
-            sortOrder: resourceRulePolicies.sortOrder,
-            position: resourceRulePolicies.position
-        })
-        .from(resourceRulePolicies)
-        .innerJoin(
-            resourcePolicyRules,
-            eq(
-                resourceRulePolicies.resourcePolicyId,
-                resourcePolicyRules.resourcePolicyId
+    if (!isRuleStackTableAvailable()) {
+        return { before: [], after: [] };
+    }
+
+    let rows: {
+        ruleId: number;
+        resourceId: number;
+        enabled: boolean;
+        priority: number;
+        action: string;
+        match: string;
+        value: string;
+        sortOrder: number;
+        position: "before" | "after";
+    }[];
+    try {
+        rows = await db
+            .select({
+                ruleId: resourcePolicyRules.ruleId,
+                resourceId: sql<number>`${resourceId}`,
+                enabled: resourcePolicyRules.enabled,
+                priority: resourcePolicyRules.priority,
+                action: resourcePolicyRules.action,
+                match: resourcePolicyRules.match,
+                value: resourcePolicyRules.value,
+                sortOrder: resourceRulePolicies.sortOrder,
+                position: resourceRulePolicies.position
+            })
+            .from(resourceRulePolicies)
+            .innerJoin(
+                resourcePolicyRules,
+                eq(
+                    resourceRulePolicies.resourcePolicyId,
+                    resourcePolicyRules.resourcePolicyId
+                )
             )
-        )
-        .where(
-            and(
-                eq(resourceRulePolicies.resourceId, resourceId),
-                eq(resourceRulePolicies.enabled, true)
-            )
-        );
+            .where(
+                and(
+                    eq(resourceRulePolicies.resourceId, resourceId),
+                    eq(resourceRulePolicies.enabled, true)
+                )
+            );
+    } catch (e) {
+        // Marks the table unavailable (and swallows) when the cause is that
+        // the migration hasn't run yet; re-throws real query failures.
+        handleRuleStackReadError(e);
+    }
 
     const before: StackedRule<ResourceRule>[] = [];
     const after: StackedRule<ResourceRule>[] = [];

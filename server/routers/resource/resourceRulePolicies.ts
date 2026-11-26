@@ -12,6 +12,10 @@ import response from "@server/lib/response";
 import HttpCode from "@server/types/HttpCode";
 import createHttpError from "http-errors";
 import logger from "@server/logger";
+import {
+    handleRuleStackReadError,
+    isRuleStackTableAvailable
+} from "@server/lib/ruleStackAvailability";
 import { fromError } from "zod-validation-error";
 import { OpenAPITags, registry } from "@server/openApi";
 
@@ -132,30 +136,47 @@ export async function listResourceRulePolicies(
 
         const { resourceId } = parsedParams.data;
 
-        const rows = await db
-            .select({
-                resourcePolicyId: resourceRulePolicies.resourcePolicyId,
-                name: resourcePolicies.name,
-                niceId: resourcePolicies.niceId,
-                position: resourceRulePolicies.position,
-                sortOrder: resourceRulePolicies.sortOrder,
-                enabled: resourceRulePolicies.enabled,
-                ruleCount: sql<number>`(select count(*) from ${resourcePolicyRules} where ${resourcePolicyRules.resourcePolicyId} = ${resourceRulePolicies.resourcePolicyId})`
-            })
-            .from(resourceRulePolicies)
-            .innerJoin(
-                resourcePolicies,
-                eq(
-                    resourcePolicies.resourcePolicyId,
-                    resourceRulePolicies.resourcePolicyId
+        // The stack table is created by a migration. On a database that hasn't
+        // been upgraded yet, report no stacks so the dashboard keeps working.
+        if (!isRuleStackTableAvailable()) {
+            return response<ListResourceRulePoliciesResponse>(res, {
+                data: { rulePolicies: [] },
+                success: true,
+                error: false,
+                message: "Resource rule policies retrieved successfully",
+                status: HttpCode.OK
+            });
+        }
+
+        let rows: ListResourceRulePoliciesResponse["rulePolicies"];
+        try {
+            rows = await db
+                .select({
+                    resourcePolicyId: resourceRulePolicies.resourcePolicyId,
+                    name: resourcePolicies.name,
+                    niceId: resourcePolicies.niceId,
+                    position: resourceRulePolicies.position,
+                    sortOrder: resourceRulePolicies.sortOrder,
+                    enabled: resourceRulePolicies.enabled,
+                    ruleCount: sql<number>`(select count(*) from ${resourcePolicyRules} where ${resourcePolicyRules.resourcePolicyId} = ${resourceRulePolicies.resourcePolicyId})`
+                })
+                .from(resourceRulePolicies)
+                .innerJoin(
+                    resourcePolicies,
+                    eq(
+                        resourcePolicies.resourcePolicyId,
+                        resourceRulePolicies.resourcePolicyId
+                    )
                 )
-            )
-            .where(eq(resourceRulePolicies.resourceId, resourceId))
-            .orderBy(
-                asc(resourceRulePolicies.position),
-                asc(resourceRulePolicies.sortOrder),
-                asc(resourceRulePolicies.id)
-            );
+                .where(eq(resourceRulePolicies.resourceId, resourceId))
+                .orderBy(
+                    asc(resourceRulePolicies.position),
+                    asc(resourceRulePolicies.sortOrder),
+                    asc(resourceRulePolicies.id)
+                );
+        } catch (error) {
+            handleRuleStackReadError(error);
+        }
 
         return response<ListResourceRulePoliciesResponse>(res, {
             data: { rulePolicies: rows },

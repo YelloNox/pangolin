@@ -23,9 +23,14 @@ import response from "@server/lib/response";
 import logger from "@server/logger";
 import { OpenAPITags, registry } from "@server/openApi";
 import type {
+    AttachedResource,
     ListResourcePoliciesResponse,
     ResourcePolicyWithResources
 } from "@server/routers/resource/types";
+import {
+    handleRuleStackReadError,
+    isRuleStackTableAvailable
+} from "@server/lib/ruleStackAvailability";
 import HttpCode from "@server/types/HttpCode";
 import { and, asc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
@@ -235,32 +240,39 @@ export async function listResourcePolicies(
 
         // Rules-only policies attach through the stack table, not
         // resources.resourcePolicyId, so list their resources from there.
-        const stackedResources =
-            rows.length === 0
-                ? []
-                : await db
-                      .select({
-                          resourceId: resources.resourceId,
-                          niceId: resources.niceId,
-                          name: resources.name,
-                          fullDomain: resources.fullDomain,
-                          resourcePolicyId:
-                              resourceRulePolicies.resourcePolicyId
-                      })
-                      .from(resourceRulePolicies)
-                      .innerJoin(
-                          resources,
-                          eq(
-                              resources.resourceId,
-                              resourceRulePolicies.resourceId
-                          )
-                      )
-                      .where(
-                          inArray(
-                              resourceRulePolicies.resourcePolicyId,
-                              rows.map((row) => row.resourcePolicyId)
-                          )
-                      );
+        let stackedResources: Array<
+            AttachedResource & { resourcePolicyId: number }
+        > = [];
+        if (rows.length > 0 && isRuleStackTableAvailable()) {
+            try {
+                stackedResources = await db
+                    .select({
+                        resourceId: resources.resourceId,
+                        niceId: resources.niceId,
+                        name: resources.name,
+                        fullDomain: resources.fullDomain,
+                        resourcePolicyId: resourceRulePolicies.resourcePolicyId
+                    })
+                    .from(resourceRulePolicies)
+                    .innerJoin(
+                        resources,
+                        eq(
+                            resources.resourceId,
+                            resourceRulePolicies.resourceId
+                        )
+                    )
+                    .where(
+                        inArray(
+                            resourceRulePolicies.resourcePolicyId,
+                            rows.map((row) => row.resourcePolicyId)
+                        )
+                    );
+            } catch (e) {
+                // Marks the table unavailable (and swallows) when the cause is
+                // that the migration hasn't run yet; re-throws real failures.
+                handleRuleStackReadError(e);
+            }
+        }
 
         const allAttachedResources = [
             ...attachedResources,
